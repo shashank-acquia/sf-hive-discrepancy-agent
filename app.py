@@ -4,8 +4,6 @@ from main import dw_validation
 
 load_dotenv()
 
-
-
 app = Flask(__name__)
 
 
