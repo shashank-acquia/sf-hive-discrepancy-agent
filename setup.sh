@@ -5,6 +5,12 @@ echo "====================================================="
 echo "SF-Hive Discrepancy Agent - Environment Setup"
 echo "====================================================="
 
+# Check if Docker is installed
+if ! command -v docker &> /dev/null; then
+    echo "Docker is not installed. Please install Docker first."
+    exit 1
+fi
+
 # Check if conda is installed
 if ! command -v conda &> /dev/null; then
     echo "Error: Conda is not installed or not in PATH."
@@ -49,8 +55,6 @@ conda install ipykernel -y
 python -m ipykernel install --user --name=snowflake_ai
 
 echo "====================================================="
-echo "Setup completed successfully!"
-echo "To activate the environment, run: conda activate snowflake_ai"
-echo "Before running the application, make sure to update the .env file with your credentials."
-echo "To start the application, run: python app.py"
+echo "Setup complete! You can now run ./build_docker.sh to build the Docker image."
 echo "====================================================="
+echo "Don't forget to edit the .env file with your configuration before running the agent."
