@@ -45,13 +45,14 @@ If you prefer manual setup, you'll need to:
 
 Configure the agent by setting the following environment variables:
 
-- `SNOWFLAKE_ACCOUNT` - Your Snowflake account identifier
 - `SNOWFLAKE_USER` - Snowflake username
-- `SNOWFLAKE_PASSWORD` - Snowflake password
-- `HIVE_HOST` - Hive server hostname
-- `HIVE_PORT` - Hive server port
-- `HIVE_USER` - Hive username
-- `HIVE_PASSWORD` - Hive password
+- `SNOWFLAKE_ACCOUNT` - Your Snowflake account identifier
+- `SNOWFLAKE_WAREHOUSE` - Snowflake warehouse to use
+- `SNOWFLAKE_DATABASE` - Snowflake database name
+- `SNOWFLAKE_SCHEMA` - Snowflake schema name
+- `HIVE_SCRIPT_DIR` - Path to directory containing Hive SQL scripts
+- `SNOWFLAKE_SCRIPT_DIR` - Path to directory containing Snowflake SQL scripts
+- `OPENAI_API_KEY` - Your OpenAI API key for LLM integration
 
 ## Scripts
 
