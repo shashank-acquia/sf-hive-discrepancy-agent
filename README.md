@@ -1,17 +1,5 @@
 # sf-hive-discrepancy-agent
 
-<<<<<<< Updated upstream
-
-SNOWFLAKE_USER=
-SNOWFLAKE_ACCOUNT=
-SNOWFLAKE_WAREHOUSE=
-SNOWFLAKE_DATABASE=
-SNOWFLAKE_SCHEMA=
-HIVE_SCRIPT_DIR=             # Path to directory containing Hive SQL scripts
-SNOWFLAKE_SCRIPT_DIR=        # Path to directory containing Snowflake SQL scripts
-OPENAI_API_KEY=              # Your OpenAI API key for LLM integration
-
-=======
 ## Overview
 This project is a Flask-based application designed to process and resolve discrepancies in Snowflake Hive data. It uses OpenAI's API for generating suggestions and resolving discrepancies.
 
@@ -92,4 +80,3 @@ The application will be accessible at: [http://localhost:5000](http://localhost:
 
 ## License
 This project is licensed under the MIT License.
->>>>>>> Stashed changes
