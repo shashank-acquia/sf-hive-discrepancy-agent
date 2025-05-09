@@ -1,0 +1,11 @@
+pandas
+ipykernel
+snowflake-connector-python
+python-dotenv
+flask
+langchain
+openai
+langchain-ollama
+langchain_community
+docx2txt
+faiss-cpu

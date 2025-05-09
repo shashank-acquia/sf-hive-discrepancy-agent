@@ -1,0 +1,9 @@
+
+conda create -n snowflake_ai python=3.10 -y
+conda activate snowflake_ai
+pip install snowflake-connector-python pandas python-dotenv langchain openai
+pip install -U langchain-ollama
+pip install flask langchain_community docx2txt faiss-cpu
+conda install ipykernel
+python -m ipykernel install --user --name=snowflake_ai
+
