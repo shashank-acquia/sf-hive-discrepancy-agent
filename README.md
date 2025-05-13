@@ -53,6 +53,46 @@ Configure the agent by setting the following environment variables:
 - `HIVE_SCRIPT_DIR` - Path to directory containing Hive SQL scripts
 - `SNOWFLAKE_SCRIPT_DIR` - Path to directory containing Snowflake SQL scripts
 - `OPENAI_API_KEY` - Your OpenAI API key for LLM integration
+- `METADATA_DIR` - (Optional) Path to directory containing metadata CSV files for script expansion
+
+## Script Expansion Feature
+
+The Script Expansion feature allows the agent to process SQL scripts with templated patterns like:
+
+```sql
+${columns:customer::%1$s string:%1$s boolean:%1$s bigint:%1$s double:%1$s decimal}
+```
+
+These patterns are expanded to include the full list of column names and types based on metadata.
+
+### How Script Expansion Works
+
+1. The agent reads SQL scripts containing templated patterns
+2. It uses metadata from CSV files (schema_table.csv and schema_column.csv) to expand these patterns
+3. The expanded scripts are then fed to the AI model for analysis
+
+### Using Script Expansion
+
+To use script expansion in your workflow:
+
+```python
+from tools.script_expansion_tool import ScriptExpansionTool
+
+# Initialize the expander with metadata directory
+expander = ScriptExpansionTool("/path/to/metadata")
+
+# Expand a specific script
+expanded_script = expander.expand_script_file("/path/to/script.sql")
+
+# Or use the integrated agent with script expansion
+python examples/script_expansion_example.py
+```
+
+### Example Patterns
+
+- `${columns:customer::%1$s}` - List all columns from customer table
+- `${columns:customer:~Email,FirstName:%1$s}` - List all columns except Email and FirstName
+- `${columns:customer::%1$s string:%1$s boolean:%1$s bigint:%1$s double:%1$s decimal}` - List columns with type-specific formatting
 
 ## Scripts
 
