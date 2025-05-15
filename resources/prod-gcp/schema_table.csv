@@ -1,0 +1,144 @@
+table_id,active,display_name,immutable,name,partition_type,step,visible,tenant_id,display_resource_key,availability
+1001,1,temp_coupon,,temp_coupon,NONE,default,1,0,$temp_coupon,[]
+1002,1,temp_couponhistory,,temp_couponhistory,NONE,default,1,0,$temp_couponhistory,[]
+10076,1,Order Origin,,c_orderorigin,NONE,default,1,10169,,null
+3,1,Promotion Campaign Cross-Reference,,promotioncampaignxref,NONE,default,1,0,$promotioncampaignxref,[]
+5,1,Customer Summary,0,customersummary,NONE,default,1,0,$customersummary,"[""CONTENT"",""EXPORT"",""SUMMARY""]"
+32,1,Transaction Summary,0,transactionsummary,TIMESTAMP,default,1,0,$transactionsummary,"[""CONTENT"",""SUMMARY""]"
+44,1,Promotion,,promotion,NONE,default,1,0,$promotion,"[""CONTENT""]"
+10010,1,Tender,,c_tender,NONE,default,1,1038,,null
+82,1,Campaign History,,campaignhistory,NONE,default,1,0,,null
+10003,1,shoprunner,,c_shoprunner,NONE,default,1,1023,,null
+74,1,Machine Learning - V2V Recommendations,,vtovrecommendations,NONE,default,1,0,$vtovrecommendations,[]
+10074,1,Country Map,,c_countrymap,NONE,default,1,10185,,null
+1008,1,ml_output_mastercustomer_likelihood_ltc_a,,ml_output_mastercustomer_likelihood_ltc_a,NONE,default,1,0,$ml_output_mastercustomer_likelihood_ltc_a,"[""ML""]"
+10002,1,User to Product Recommendations,,ml_out_mc_utoprecommendations,MARKED_COL,default,1,0,$ml_out_mc_utoprecommendations,"[""ML"",""CONTENT""]"
+21,1,Transaction Item,,transactionitem,TIMESTAMP,default,1,0,$transactionitem,"[""EXPORT""]"
+45,1,Machine Learning - Cluster,,mlcluster,NONE,default,1,0,$mlcluster,"[""ML""]"
+10041,1,Bin,,c_bin,NONE,default,1,1071,,null
+66,1,Machine Learning - Brand Clustering Input,,mlbrandclusteringinput,NONE,default,1,0,$mlbrandclusteringinput,"[""ML""]"
+10067,1,Customer Append,,c_customerappend,NONE,default,1,10179,,"[""CAMPAIGN"",""CONTENT""]"
+10,1,Product Category Cross-Reference,,productcategoryxref,NONE,default,1,0,$productcategoryxref,"[""EXPORT""]"
+10032,1,Custom Fiscal Calendar,,c_customfiscalcalendar,NONE,default,1,1028,,null
+10050,1,Date Attributes,,c_dateattributes,NONE,default,1,1067,,null
+10056,1,Machine Learning - Regression Evaluation Metrics,,ml_out_meta_regression_evaluation_metrics,NONE,default,1,0,$ml_out_meta_regression_evaluation_metrics,"[""CUBE"",""EXPORT""]"
+10081,1,ml_out_meta_cdp_metrics,,ml_out_meta_cdp_metrics,NONE,default,1,0,$ml_out_meta_cdp_metrics,"[""ML"",""CUBE"",""EXPORT""]"
+23,1,Product,,product,NONE,default,1,0,$product,"[""CONTENT"",""EXPORT""]"
+10013,1,Date Attributes,,c_dateattributes,NONE,default,1,1033,,null
+14,1,Promotion Summary,,promotionsummary,NONE,default,1,0,$promotionsummary,[]
+10049,1,Transaction Tender,,c_transactiontender,NONE,default,1,1067,,null
+35,1,Household Summary,0,householdsummary,NONE,default,1,0,$householdsummary,"[""CONTENT"",""SUMMARY"",""EXPORT""]"
+37,1,Campaign,,campaign,NONE,default,1,0,$campaign,[]
+128,1,Custom Entity,,c_customentity,NONE,default,1,465,,null
+127,1,Master Customer Group Summary,,mastercustomergroupsummary,NONE,default,1,0,$mastercustomergroupsummary,"[""CONTENT"",""SUMMARY"",""EXPORT""]"
+10012,1,Transaction Tender,,c_transactiontender,NONE,default,1,1038,,null
+10011,1,Bin,,c_bin,NONE,default,1,1038,,null
+83,1,ZIP Code Closest Stores,,zipcloseststores,NONE,default,1,0,$zipcloseststores,[]
+1007,1,Coupon,,coupon,MARKED_COL,default,1,0,$coupon,"[""CONTENT""]"
+65,1,Machine Learning - Product Clustering Input,,mlproductcategoryclusteringinput,NONE,default,1,0,$mlproductcategoryclusteringinput,"[""ML""]"
+1009,1,ml_output_mastercustomer_likelihood_lte_a,,ml_output_mastercustomer_likelihood_lte_a,NONE,default,1,0,$ml_output_mastercustomer_likelihood_lte_a,"[""ML""]"
+10016,1,Date Attributes,,c_dateattributes,NONE,default,1,1041,,null
+78,1,Machine Learning - U2P Recommendations,,utoprecommendations,NONE,default,1,0,$utoprecommendations,"[""EXPORT""]"
+68,1,Machine Learning - Recommendations,,mlrecommendations,NONE,default,1,0,$mlrecommendations,[]
+10039,1,webtouch,,webtouch,TIMESTAMP,default,1,0,$webtouch,[]
+10077,1,Bread Financial,,c_breadfinancial,NONE,default,1,10175,,"[""CONTENT"",""CAMPAIGN""]"
+20,1,Transaction Message Cross-Reference,,transactionmessagexref,NONE,default,1,0,$transactionmessagexref,[]
+10052,1,Machine Learning - Likelihood Evaluation,,ml_out_meta_likelihood_evaluation,NONE,default,1,0,$ml_out_meta_likelihood_evaluation,"[""CUBE"",""EXPORT""]"
+18,1,Event,0,event,TIMESTAMP,default,1,0,$event,"[""CONTENT""]"
+75,1,Machine Learning - Recommendation Observations,,mlrecoobservations,NONE,default,1,0,$mlrecoobservations,"[""ML""]"
+17,1,Anonymous Event,0,anonymousevent,TIMESTAMP,default,1,0,$anonymousevent,[]
+10058,1,EDQ,,c_edq,NONE,default,1,10169,$c_edq,null
+10079,1,Bread Financial,,c_breadfinancial,NONE,default,1,1031,,"[""CAMPAIGN"",""CONTENT""]"
+38,1,Household,,household,NONE,default,1,0,$household,"[""EXPORT""]"
+10044,1,Date Attributes,,c_dateattributes,NONE,default,1,1071,,null
+10075,1,Customer Credit Card Cross-Reference,,c_customercreditcardxref,NONE,default,1,10175,,null
+72,1,Machine Learning - P2P Recommendations,,ptoprecommendations,NONE,default,1,0,$ptoprecommendations,[]
+10000,1,Audience History,0,audiencehistory,MARKED_COL,default,1,0,$audiencehistory,[]
+10031,1,c_bluecutover,,c_bluecutover,NONE,default,1,1078,,"[""EXPORT"",""CAMPAIGN""]"
+10034,1,Customer Append,,c_customerappend,NONE,default,1,1086,,"[""CONTENT"",""CAMPAIGN""]"
+9,1,Product Image,,productimage,NONE,default,1,0,$productimage,[]
+10017,1,Customer Group Memberships,,c_customergroupmemberships,NONE,default,1,1031,,null
+10061,1,Customer Demographic,,c_customerdemographic,NONE,default,1,10169,$c_customerdemographic,"[""CAMPAIGN"",""CONTENT"",""API"",""PII"",""CUBE"",""SUMMARY"",""EXPORT"",""ML""]"
+125,1,Product Category Hierarchy,0,productcategoryflattened,NONE,default,1,0,$productcategoryflattened,[]
+2,1,Product Summary,0,productsummary,NONE,default,1,0,$productsummary,"[""SUMMARY""]"
+10060,1,Customer Change History,,c_customerchangehistory,NONE,default,1,10169,,null
+10065,1,Transaction Coupon Cross-Reference,,c_transactioncouponxref,NONE,default,1,1033,,"[""EXPORT""]"
+10066,1,Customer Append,,c_customerappend,NONE,default,1,10180,$c_customerappend,"[""CONTENT"",""CAMPAIGN""]"
+114,1,Transaction Message Cross-Reference Per Houshold,,transactionmessagexrefhousehold,NONE,default,1,0,$transactionmessagexrefhousehold,[]
+6,1,Promotion Type Summary,0,promotiontypesummary,NONE,default,1,0,$promotiontypesummary,"[""SUMMARY""]"
+10068,1,Country Map,,c_countrymap,NONE,default,1,10173,,null
+19,1,Customer - Last Transaction Product Category,,customerlasttransactionproductcategory,NONE,default,1,0,$customerlasttransactionproductcategory,[]
+1005,1,ml_out_mc_likelihood_ltc_a,,ml_out_mc_likelihood_ltc_a,MARKED_COL,default,1,0,$ml_out_mc_likelihood_ltc_a,"[""ML""]"
+10071,1,Product Review,,c_productreview,NONE,default,1,10171,$c_productreview,"[""CONTENT"",""CAMPAIGN""]"
+22,1,Subscription Product Mapping,,subscriptionproductxref,NONE,default,1,0,$subscriptionproductxref,[]
+33,1,Customer - First Transaction Product Category,,customerfirsttransactionproductcategory,NONE,default,1,0,$customerfirsttransactionproductcategory,[]
+10007,1,Transaction Tender,,c_transactiontender,NONE,default,1,1041,,null
+10014,1,Payment Method,,paymentmethod,NONE,default,1,0,$paymentmethod,"[""EXPORT""]"
+26,1,Product Category Summary,0,productcategorysummary,NONE,default,1,0,$productcategorysummary,"[""SUMMARY""]"
+70,1,Machine Learning - Behavior DNA,,mlbehaviordna,NONE,default,1,0,$mlbehaviordna,"[""ML""]"
+73,1,Machine Learning - V2P Recommendations,,vtoprecommendations,NONE,default,1,0,$vtoprecommendations,[]
+10042,1,Tender,,c_tender,NONE,default,1,1071,,null
+10054,1,Product Flyer,,c_productflyer,NONE,default,1,10167,,null
+10035,1,Customer Append,,c_customerappend,NONE,default,1,1089,$c_customerappend,"[""CONTENT"",""CAMPAIGN""]"
+10059,1,Customer CC Token,,c_customercctoken,NONE,default,1,10169,$c_customercctoken,null
+16,1,Master Customer,0,mastercustomer,NONE,default,1,0,$mastercustomer,"[""EXPORT""]"
+10043,1,Transaction Tender,,c_transactiontender,NONE,default,1,1071,,null
+10062,1,RFM Rank Priority,,c_rfmrankpriority,NONE,default,1,10169,,"[""CAMPAIGN"",""API"",""CONTENT"",""CUBE"",""PII"",""SUMMARY"",""EXPORT"",""ML""]"
+1,1,Dispatch,,dispatch,NONE,default,1,0,$dispatch,[]
+12,1,Household - Last Transaction Product Category,,householdlasttransactionproductcategory,NONE,default,1,0,$householdlasttransactionproductcategory,[]
+10047,1,Transaction Tender,,c_transactiontender,NONE,default,1,1076,,null
+8,1,Employee,,employee,NONE,default,1,0,$employee,[]
+25,1,ZIP Code Demographics,,zipdemographics,NONE,default,1,0,$zipdemographics,[]
+10078,1,Price Type,,c_pricetype,NONE,default,1,10169,,null
+41,1,Customer Address Cross-Reference,,customeraddressxref,NONE,default,1,0,$customeraddressxref,"[""EXPORT""]"
+46,1,Machine Learning - Propensity to Buy,,mlpropensity,NONE,default,1,0,$mlpropensity,"[""ML""]"
+7,1,Subscription,,subscription,NONE,default,1,0,$subscription,[]
+28,1,Household - First Transaction Product Category,,householdfirsttransactionproductcategory,NONE,default,1,0,$householdfirsttransactionproductcategory,[]
+69,1,Machine Learning - Brand DNA,,mlbranddna,NONE,default,1,0,$mlbranddna,"[""ML""]"
+36,1,Time Summary,,timesummary,NONE,default,1,0,$timesummary,"[""SUMMARY""]"
+10040,1,Tender,,c_tender,NONE,default,1,1067,,null
+11,1,Fiscal Calendar,,fiscalcalendar,NONE,default,1,0,$fiscalcalendar,[]
+10037,1,Domain Technology Cross-Reference,,c_domaintechnologyxref,NONE,default,1,10114,,"[""API"",""EXPORT"",""CONTENT"",""CAMPAIGN""]"
+10080,1,UNSD Country Region,,c_unsdcountryregion,NONE,default,1,10171,,null
+39,1,Organization Summary,0,organizationsummary,NONE,default,1,0,$organizationsummary,"[""CONTENT"",""SUMMARY""]"
+10046,1,Tender,,c_tender,NONE,default,1,1076,,null
+10063,1,ml_out_mc_audiencebooster,,ml_out_mc_audiencebooster,MARKED_COL,default,1,0,$ml_out_mc_audiencebooster,"[""ML""]"
+31,1,Customer History,,customerhistory,NONE,default,1,0,$customerhistory,[]
+124,1,Machine Learning - Product DNA,,mlproductdna,NONE,default,1,0,$mlproductdna,"[""ML""]"
+10006,1,Transaction Tender,,c_transactiontender,NONE,default,1,1033,,null
+10072,1,Customer Group Memberships,,c_customergroupmemberships,NONE,default,1,10175,,null
+10008,1,Tender,,c_tender,NONE,default,1,1041,,null
+126,1,Master Customer Group,,mastercustomergroup,NONE,default,1,0,$mastercustomergroup,"[""EXPORT""]"
+10051,1,Machine Learning - Regression Evaluation,,ml_out_meta_regression_evaluation,NONE,default,1,0,$ml_out_meta_regression_evaluation,"[""CUBE"",""EXPORT""]"
+10073,1,Country Map,,c_countrymap,NONE,default,1,10181,,null
+10001,1,Machine Learning Segment,0,ml_out_mc_summary,NONE,default,1,0,$ml_out_mc_summary,"[""CONTENT"",""ML""]"
+10057,1,Customer Email Xref,,c_customeremailxref,NONE,default,1,10167,,null
+10053,1,Machine Learning - Clustering Evaluation,,ml_out_meta_clustering_evaluation,NONE,default,1,0,$ml_out_meta_clustering_evaluation,"[""CUBE"",""EXPORT""]"
+30,1,Product Properties,,productproperties,NONE,default,1,0,$productproperties,[]
+42,1,Transaction,,transaction,TIMESTAMP,default,1,0,$transaction,"[""EXPORT""]"
+10036,1,Domain,,c_domain,NONE,default,1,10114,,"[""API"",""EXPORT"",""CONTENT"",""CAMPAIGN""]"
+4,1,Product Category,,productcategory,NONE,default,1,0,$productcategory,"[""EXPORT""]"
+1006,1,Coupon History,,couponhistory,MARKED_COL,default,1,0,$couponhistory,"[""CONTENT""]"
+10015,1,Transaction Payment Method Cross-Reference,,transactionpaymentmethodxref,TIMESTAMP,default,1,0,$transactionpaymentmethodxref,"[""EXPORT""]"
+10045,1,Bin,,c_bin,NONE,default,1,1076,,null
+10033,1,Customer Credit Card XRef,,c_customercreditcardxref,NONE,default,1,1028,,null
+1004,1,ml_out_mc_likelihood_lte_a,,ml_out_mc_likelihood_lte_a,MARKED_COL,default,1,0,$ml_out_mc_likelihood_lte_a,"[""ML""]"
+10038,1,Technology,,c_technology,NONE,default,1,10114,,"[""API"",""EXPORT"",""CONTENT"",""CAMPAIGN""]"
+10030,1,c_vendor,,c_vendor,NONE,default,1,1078,,null
+34,1,Organization,,organization,NONE,default,1,0,$organization,"[""EXPORT""]"
+10029,1,associate,,c_associate,NONE,default,1,1075,,null
+15,1,Hour Summary,0,hoursummary,NONE,default,1,0,$hoursummary,"[""SUMMARY""]"
+29,1,Message,,message,NONE,default,1,0,$message,[]
+10004,1,Bin,,c_bin,NONE,default,1,1033,," [""CONTENT"",""CUBE"",""PII"",""API"",""CAMPAIGN"",""EXPORT""] "
+13,1,Holidays,,holidays,NONE,default,1,0,$holidays,[]
+10009,1,Bin,,c_bin,NONE,default,1,1041,,null
+24,1,Address,,address,NONE,default,1,0,$address,"[""EXPORT""]"
+10048,1,Bin,,c_bin,NONE,default,1,1067,," [""CUBE"",""PII"",""API"",""CAMPAIGN"",""EXPORT"",""CONTENT""] "
+10064,1,Transaction Coupon Cross-Reference,,c_transactioncouponxref,NONE,default,1,1067,,null
+43,1,Customer,,customer,NONE,default,1,0,$customer,"[""EXPORT""]"
+10070,1,Country Map,,c_countrymap,NONE,default,1,10184,,null
+10005,1,Tender,,c_tender,NONE,default,1,1033,,null
+27,1,Transaction Item Message Cross-Reference,,transactionitemmessagexref,NONE,default,1,0,$transactionitemmessagexref,[]
+40,1,Account,,account,NONE,default,1,0,$account,"[""CAMPAIGN"",""CONTENT""]"
+10055,1,Machine Learning - Likelihood Evaluation Metrics,,ml_out_meta_likelihood_evaluation_metrics,NONE,default,1,0,$ml_out_meta_likelihood_evaluation_metrics,"[""CUBE"",""EXPORT""]"
+10069,1,Country Map,,c_countrymap,NONE,default,1,10183,,null

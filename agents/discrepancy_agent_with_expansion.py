@@ -122,7 +122,6 @@ def lookup(table_name: str, list_ids: List[str]) -> str:
     Returns:
         Discrepancies as a string
     """
-    # Use ChatGPT instead of Ollama for better results
     llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
 
     # Prompt template for context

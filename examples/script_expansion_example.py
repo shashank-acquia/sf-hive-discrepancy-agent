@@ -4,14 +4,16 @@
 Example script showing how to use the script expansion functionality
 in the SF-Hive discrepancy agent pipeline.
 """
-
+import sys
 import os
 import logging
 import json
 from dotenv import load_dotenv
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from agents.extract_agent import lookup as extract_discrepancy_ids
 from agents.discrepancy_agent_with_expansion import lookup_with_expanded_scripts
 from agents.suggester_agent_with_expansion import generate_discrepancy_suggestions_with_scripts
+
 
 # Configure logging
 logging.basicConfig(
@@ -31,7 +33,7 @@ def main():
     """Main function demonstrating the script expansion pipeline."""
     # 1. Set up configuration
     table_name = os.getenv("TARGET_TABLE", "CUSTOMER")
-    metadata_dir = os.getenv("METADATA_DIR", "script-testing/src/test/resources/evolutions/t0/prod-eu")
+    metadata_dir = os.getenv("METADATA_DIR", "resources/prod-gcp")
     
     # Ensure the metadata directory exists
     if not os.path.isdir(metadata_dir):
@@ -73,12 +75,14 @@ def main():
         expanded_scripts = result['expanded_scripts']
         
         logger.info(f"Found {len(expanded_scripts)} expanded scripts")
+        logger.info("Expanded script is ");
+        logger.info(expanded_scripts);
         
     except Exception as e:
         logger.error(f"Error getting discrepancies with expanded scripts: {e}", exc_info=True)
         return
     
-    # 4. Generate suggestions using expanded scripts
+   # 4. Generate suggestions using expanded scripts
     logger.info("Generating discrepancy suggestions with expanded scripts")
     try:
         suggestions = generate_discrepancy_suggestions_with_scripts(

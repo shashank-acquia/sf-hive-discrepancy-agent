@@ -26,7 +26,7 @@ class ScriptExpansionTool:
             # Try to get from environment variables or use default location
             self.metadata_dir = os.getenv("METADATA_DIR", os.path.join(
                 os.path.dirname(os.path.dirname(__file__)), 
-                "script-testing/src/test/resources/evolutions/t0/prod-eu"
+                "resources/prod-gcp"
             ))
         
         # Cache for table and column metadata
@@ -46,11 +46,23 @@ class ScriptExpansionTool:
             with open(table_csv_path, 'r') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    table_name = row.get('TABLE_NAME', '').lower()
+                    table_name = row.get('name', '').lower()
+                    table_id=row.get('table_id', '').lower()
                     if table_name:
-                        self._table_metadata[table_name] = row
+                        self._table_metadata[table_name] = table_id
         
         # Load column metadata
+                def get_data_type(type_id):
+            # Define the mapping of type IDs to data types
+                    type_map = {
+                        '1': "LONG",
+                        '0': "INTEGER",
+                        '2': "STRING",
+                        '3': "DOUBLE",
+                        '4': "BOOLEAN",
+                        '5': "DECIMAL"
+                    }
+                    return type_map.get(type_id, "Unknown Type")
         column_csv_path = os.path.join(self.metadata_dir, "schema_column.csv")
         if os.path.exists(column_csv_path):
             import csv
@@ -58,98 +70,99 @@ class ScriptExpansionTool:
             with open(column_csv_path, 'r') as f:
                 reader = csv.DictReader(f)
                 for row in reader:
-                    table_name = row.get('TABLE_NAME', '').lower()
-                    column_name = row.get('COLUMN_NAME', '')
-                    column_type = row.get('DATA_TYPE', '')
+                    table_id = row.get('tableId', '').lower()
+                    column_name = row.get('name', '')
+                    column_type = get_data_type(row.get('type', ''))
                     
-                    if table_name and column_name:
-                        if table_name not in self._column_metadata:
-                            self._column_metadata[table_name] = []
+                    if table_id and column_name:
+                        if table_id not in self._column_metadata:
+                            self._column_metadata[table_id] = []
                         
-                        self._column_metadata[table_name].append({
+                        self._column_metadata[table_id].append({
                             'name': column_name,
                             'type': column_type,
                             'row': row
                         })
     
     def get_columns_for_table(self, table_name: str) -> List[Dict]:
-        """Get column information for a specific table."""
-        self._load_metadata()
-        table_name = table_name.lower()
-        
-        if not self._column_metadata or table_name not in self._column_metadata:
-            return []
+            self._load_metadata()
+            original_table_name = table_name.lower()
+            columns = []
+
+            # Attempt direct lookup
+            table_id = self._table_metadata.get(original_table_name)
+            if table_id and table_id in self._column_metadata:
+                columns = self._column_metadata[table_id]
+            else:
+                # Try removing known prefixes
+                fallback_prefixes = ['udm_sf_', 'udm_s_', 'delta_stage_', 'delta_udm_']
+                for prefix in fallback_prefixes:
+                    if original_table_name.startswith(prefix):
+                        simplified_name = original_table_name[len(prefix):]
+                        table_id = self._table_metadata.get(simplified_name)
+                        if table_id and table_id in self._column_metadata:
+                            columns = self._column_metadata[table_id]
+                            break  # Found valid match, break out of loop
+
+            if not columns:
+                raise IOError(f"Schema definition for table '{table_name}' not found")
+
+            return columns
             
-        return self._column_metadata[table_name]
-        
     def expand_column_pattern(self, match: re.Match) -> str:
-        """Expand a ${columns:...} pattern using metadata."""
         try:
-            full_match = match.group(0)
-            pattern_content = match.group(1)
-            
-            # Parse the pattern content
-            parts = pattern_content.split(':')
-            
-            # Basic pattern format check
-            if len(parts) < 3 or parts[0] != 'columns':
+            full_match = match.group(0)         # e.g., ${columns:customer::c.%1$s AS %1$s}
+            pattern_content = match.group(1)    # e.g., columns:customer::c.%1$s AS %1$s
+
+            parts = pattern_content.split(":")
+            if len(parts) < 3 or parts[0].lower() != "columns":
                 return full_match
-                
-            table_name = parts[1].lower()
-            
-            # Check for exclusion pattern (~column1,column2,...)
+
+            table_name = parts[1].strip().lower()
             exclusions = []
-            format_str = ':'.join(parts[2:])
-            if '~' in parts[2]:
-                exclusion_parts = parts[2].split('~')
-                if len(exclusion_parts) >= 2:
-                    format_str = ':'.join([exclusion_parts[0]] + parts[3:])
-                    exclusions = [col.strip() for col in exclusion_parts[1].split(',')]
-            
-            # Get columns for this table
+            format_str_parts = parts[2:]  # everything after table name
+
+            # Handle exclusion if it starts with ~
+            if parts[2].startswith("~"):
+                exclusion_part = parts[2][1:]
+                exclusions = [e.strip().upper() for e in exclusion_part.split(",") if e.strip()]
+                format_str_parts = parts[3:]
+
+            # Join remaining parts into format string
+            format_spec_str = ":".join(format_str_parts).rstrip("}")
+
+            if not format_spec_str:
+                default_format = "%1$s"  # fallback
+            else:
+                format_types = format_spec_str.split(":")
+                default_format = format_types[0]
+                format_map = {}
+
+                for entry in format_types[1:]:
+                    tf_parts = entry.strip().split(" ")
+                    if len(tf_parts) == 2:
+                        format_map[tf_parts[0].lower()] = tf_parts[1]
+
+            # Get and filter columns
             columns = self.get_columns_for_table(table_name)
             if not columns:
                 return full_match
-                
-            # Remove excluded columns
+
             if exclusions:
-                columns = [col for col in columns if col['name'] not in exclusions]
-            
-            # Parse format specifiers for different data types
-            format_specs = {}
-            default_format = "%1$s"
-            
-            # Handle the different format types (string, boolean, etc.)
-            type_formats = format_str.split(':')
-            if len(type_formats) > 1:
-                default_format = type_formats[0]
-                
-                for type_format in type_formats[1:]:
-                    parts = type_format.split(' ')
-                    if len(parts) == 2:
-                        format_specs[parts[0]] = parts[1]
-            else:
-                default_format = format_str
-            
-            # Generate the expanded column list
+                columns = [col for col in columns if col['name'].upper() not in exclusions]
+
             result = []
             for col in columns:
-                column_name = col['name'].upper()  # Usually SQL column names are uppercase
-                col_type = col['type'].lower() if col['type'] else 'string'
-                
-                # Use type-specific format if available, otherwise use default
-                format_to_use = format_specs.get(col_type, default_format)
-                
-                # Replace the format specifier with the column name
-                formatted = format_to_use.replace("%1$s", column_name)
-                result.append(formatted)
-            
-            # Join the expanded columns
-            return ','.join(result)
-            
+                col_name = col['name'].upper()
+                col_type = (col.get('type') or 'string').lower()
+                fmt = format_map.get(col_type, default_format)
+                result.append(fmt.replace("%1$s", col_name))
+
+            return ",".join(result)
+
         except Exception as e:
-            print(f"Error expanding column pattern: {e}")
-            return match.group(0)  # Return the original match if expansion fails
+            print(f"Error expanding pattern {match.group(0)}: {e}")
+            return match.group(0)
             
     def expand_script(self, script_content: str) -> str:
         """

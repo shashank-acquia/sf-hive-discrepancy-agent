@@ -172,11 +172,19 @@ from typing import List, Dict
 import ast
 import re
 from langchain_community.chat_models import ChatOpenAI
+from tools.script_expansion_tool import ScriptExpansionTool
 
 load_dotenv()
 
 HIVE_SCRIPT_DIR = os.getenv("HIVE_SCRIPT_DIR")
 SNOWFLAKE_SCRIPT_DIR = os.getenv("SNOWFLAKE_SCRIPT_DIR")
+table_name = os.getenv("TARGET_TABLE", "CUSTOMER")
+metadata_dir = os.getenv("METADATA_DIR", "resources/prod-gcp")
+    
+    # Ensure the metadata directory exists
+if not os.path.isdir(metadata_dir):
+        print(f"Metadata directory not found: {metadata_dir}")
+        print("Script expansion may not work correctly without metadata.")
 
 llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
 
@@ -296,7 +304,8 @@ def discrepancy_suggester(input_data: dict) -> str:
     matched_pairs = match_file_pairs(hive_files, snowflake_files)
 
     print(f"📄 Matched file pairs: {matched_pairs}")
-
+    metadata_dir = os.getenv("METADATA_DIR")
+    expander = ScriptExpansionTool(metadata_dir)
     results = []
     for entry in discrepancies:
         column = entry["columnName"]
@@ -307,12 +316,16 @@ def discrepancy_suggester(input_data: dict) -> str:
         for hive_file, sf_file in matched_pairs:
             hive_sql = hive_files[hive_file]
             sf_sql = snowflake_files[sf_file]
+            expanded_hive_sql=expander.expand_script(hive_sql)
+            expanded_sf_sql=expander.expand_script(sf_sql)
 
-            if find_column_in_sql(column, hive_sql, sf_sql):
+        #   WRITE LOGIC FOR EXPAND
+
+            if find_column_in_sql(column, expanded_hive_sql, expanded_sf_sql):
                 column_found = True
 
-                hive_snippet = extract_relevant_sql(hive_sql, column)
-                snowflake_snippet = extract_relevant_sql(sf_sql, column)
+                hive_snippet = extract_relevant_sql(expanded_hive_sql, column)
+                snowflake_snippet = extract_relevant_sql(expanded_sf_sql, column)
 
                 if not hive_snippet and not snowflake_snippet:
                     print(f"⚠️ No relevant SQL snippet found for column {column}")
