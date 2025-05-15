@@ -186,7 +186,7 @@ if not os.path.isdir(metadata_dir):
         print(f"Metadata directory not found: {metadata_dir}")
         print("Script expansion may not work correctly without metadata.")
 
-llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
+llm = ChatOpenAI(temperature=0, model_name="gpt-4.1")
 
 def extract_suffix(file_name: str, prefix: str) -> str:
     if file_name.startswith(prefix):
