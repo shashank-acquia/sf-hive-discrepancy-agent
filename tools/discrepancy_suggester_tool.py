@@ -178,7 +178,7 @@ load_dotenv()
 
 HIVE_SCRIPT_DIR = os.getenv("HIVE_SCRIPT_DIR")
 SNOWFLAKE_SCRIPT_DIR = os.getenv("SNOWFLAKE_SCRIPT_DIR")
-table_name = os.getenv("TARGET_TABLE", "CUSTOMER")
+# Table name is provided directly by the function caller
 metadata_dir = os.getenv("METADATA_DIR", "resources/prod-gcp")
     
     # Ensure the metadata directory exists

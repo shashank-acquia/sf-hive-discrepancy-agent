@@ -20,6 +20,15 @@
             margin-bottom: 0.5rem;
         }
 
+        #entity-select {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            margin-right: 8px;
+            min-width: 200px;
+            font-size: 16px;
+        }
+
         #tab-buttons {
             display: flex;
             justify-content: center;
@@ -64,7 +73,12 @@
         <img src="https://cdn-icons-png.flaticon.com/512/3039/3039384.png" alt="Logo">
         <h1>SF-HIVE Data Validation (LLM Agent)</h1>
         <form id="name-form">
-            <input type="text" name="name" placeholder="Enter Entity name">
+            <select name="name" id="entity-select" required>
+                <option value="" disabled selected>Select Entity</option>
+                {% for display_name, value in entities %}
+                <option value="{{ value }}">{{ display_name }}</option>
+                {% endfor %}
+            </select>
             <button id="magic-button" type="submit">Validate</button>
         </form>
     </header>
