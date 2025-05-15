@@ -68,11 +68,12 @@ def get_snowflake_connection():
 class ConnectionManager:
     def __init__(self):
         self.connection = None
+        self.max_retries = 3
         self.validation_interval = 60  # 5 minutes in seconds
         self._stop_validation = False
         self._validation_thread = None
         self._start_validation_thread()
-        self.max_retries = 3
+        
 
     def _connection_validator(self):
         """Background thread that periodically validates the connection."""
