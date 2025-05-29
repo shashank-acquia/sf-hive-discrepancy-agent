@@ -2,6 +2,8 @@ import os
 import json
 from dotenv import load_dotenv
 from langchain.prompts.prompt import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 from langchain_ollama.llms import OllamaLLM
 from typing import List, Dict
 import ast
@@ -28,9 +30,9 @@ if not os.path.isdir(metadata_dir):
     logger.warning(f"Metadata directory not found: {metadata_dir}")
     logger.warning("Script expansion may not work correctly without metadata.")
 
-rag_tool = RAGTool()
+# rag_tool = RAGTool()
 
-llm = ChatOpenAI(temperature=0, model_name="gpt-4.1")
+llm = ChatOpenAI(temperature=0.7, model_name="gpt-4.1",cache=False)
 
 def extract_suffix(file_name: str, prefix: str) -> str:
     if file_name.startswith(prefix):
@@ -76,8 +78,18 @@ def extract_relevant_sql(sql_text: str, column: str, context_lines: int = 50) ->
     return ""
 
 def ask_llm_to_fix(column: str, hive_snippet: str, snowflake_snippet: str, hive_val: str, sf_val: str, hive_file: str, sf_file: str) -> str:
+
+
     prompt = f"""
-    You are a Snowflake SQL expert. There is a discrepancy in the column `{column}`: 
+    You are an expert data engineer skilled in both Hive and Snowflake SQL. Your task is to diagnose data mismatches and generate high-quality, production-ready SQL fixes.
+     Instructions:
+        - Always generate a clean, multi-line fix in valid Snowflake SQL syntax.
+        - Do NOT skip explanation or return a one-liner.
+        - Color you explanation or suggestion in green color
+        - Return a fix that is more than 100 characters.
+        - If unsure, reply with: "I do not know."
+        - Follow the output format strictly.
+    There is a discrepancy in the column `{column}`: 
     Hive output = `{hive_val}`, Snowflake output = `{sf_val}`.
 
     Here is the relevant Hive SQL snippet from `{hive_file}`:
@@ -89,19 +101,15 @@ def ask_llm_to_fix(column: str, hive_snippet: str, snowflake_snippet: str, hive_
     ```
     {snowflake_snippet}
     ```
-
-    1. Suggest a modification to the Snowflake SQL to make it match Hive output.
-    2. Be specific to this file and column.
-    3. Return a clean, valid snowflake script for fix, which can be run directly on snowflake.
-    4. Provide a summary why this fix is required and what is done in this fix.
-    5. If unsure, say "I do not know".
     """
 
     prompt_template = PromptTemplate(
-        input_variables=["prompt"],
-        template="You are a data engineering assistant.\nUser: {prompt}\nAssistant:"
-    )
-
+    input_variables=[
+     column, hive_snippet, snowflake_snippet,
+    hive_val, sf_val, hive_file, sf_file
+   ],
+    template=prompt,
+   )
     chain = prompt_template | llm
     logger.info("🚀 Invoking LLM...")
     return chain.invoke({"prompt": prompt})
@@ -175,6 +183,7 @@ def discrepancy_suggester(input_data: dict) -> str:
     metadata_dir = os.getenv("METADATA_DIR")
     expander = ScriptExpansionTool(metadata_dir)
     results = []
+    expanded_sql_map = {}  
     
     for entry in discrepancies:
         column = entry["columnName"]
@@ -187,6 +196,8 @@ def discrepancy_suggester(input_data: dict) -> str:
             sf_sql = snowflake_files[sf_file]
             expanded_hive_sql = expander.expand_script(hive_sql)
             expanded_sf_sql = expander.expand_script(sf_sql)
+            expanded_sql_map[hive_file] = expanded_hive_sql
+            expanded_sql_map[sf_file] = expanded_sf_sql
 
             if find_column_in_sql(column, expanded_hive_sql, expanded_sf_sql):
                 column_found = True
@@ -204,9 +215,9 @@ def discrepancy_suggester(input_data: dict) -> str:
                 ))
                 
                 # Enhance with RAG if available
-                enhanced_suggestion = enhance_suggestion_with_rag(
-                    column, hive_snippet, snowflake_snippet, hive_val, snowflake_val, basic_suggestion
-                )
+                # enhanced_suggestion = enhance_suggestion_with_rag(
+                #     column, hive_snippet, snowflake_snippet, hive_val, snowflake_val, basic_suggestion
+                # )
 
                 logger.info(f"✅ Generated suggestion for column: {column}, files: ({hive_file}, {sf_file})")
                 results.append({
@@ -215,7 +226,7 @@ def discrepancy_suggester(input_data: dict) -> str:
                     "snowflake_val": snowflake_val,
                     "hive_file": hive_file,
                     "snowflake_file": sf_file,
-                    "suggestion": enhanced_suggestion
+                    "suggestion": basic_suggestion
                 })
 
         if not column_found:
@@ -224,4 +235,7 @@ def discrepancy_suggester(input_data: dict) -> str:
     if not results:
         logger.warning("⚠️ No suggestions were generated.")
 
-    return json.dumps(results, indent=2)
+    return json.dumps({
+    "results": results,
+    "expanded_sql_map": expanded_sql_map
+}, indent=2)

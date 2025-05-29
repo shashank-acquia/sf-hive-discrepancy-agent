@@ -11,8 +11,14 @@ load_dotenv()
 
 class DWValidationConfig:
     def __init__(self):
-        self.snowflake_dw_schema = os.getenv("SNOWFLAKE_DW_SCHEMA", "SANDBOX")
-        self.snowflake_hive_schema = os.getenv("SNOWFLAKE_HIVE_SCHEMA", "SANDBOX")
+        self.mode = os.getenv("MODE", "TESTING")
+        if self.mode == "TESTING":
+            self.snowflake_dw_schema = "SANDBOX"
+            self.snowflake_hive_schema = "SANDBOX"
+        else:
+            self.snowflake_dw_schema = "DW"
+            self.snowflake_hive_schema = "DW_HIVE_INC"
+
 
     def getMetricsQuery(self):
         return f"""
@@ -33,12 +39,13 @@ class DWValidationConfig:
         """
     
     def getMismatchQuery(self, table_name: str, id_val: str):
+        table_name_suffix = "_RK" if self.mode == "TESTING" else ""
         return f"""
             CALL sandbox.COMPARE_MISMATCH_IGNORE_EXCLUDED_COL1(
                 '{self.snowflake_hive_schema}',
                 '{self.snowflake_dw_schema}',
-                '{table_name}_RK',
-                'DELTA_STAGE_{table_name}_RK',
+                '{table_name}{table_name_suffix}',
+                'DELTA_STAGE_{table_name}{table_name_suffix}',
                 'ID',
                 '{id_val}'
             )

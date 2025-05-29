@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, jsonify
 from dotenv import load_dotenv
-from main import dw_validation
+from main import dw_validation,getColumnList
 
 load_dotenv()
 
@@ -16,11 +16,20 @@ def index():
 def process():
     name = request.form["name"]
     
-    suggestions, discrepancy_json = dw_validation(name=name)
+    suggestions, discrepancy_json , expanded_scr_map = dw_validation(name=name)
 
     return jsonify({
         "suggestions": suggestions,
-        "discrepancies": discrepancy_json
+        "discrepancies": discrepancy_json,
+        "expanded_scr_map":expanded_scr_map
+    })
+
+@app.route("/metadata", methods=["GET"])
+def metadata():
+    col_list = getColumnList()
+
+    return jsonify({
+        "col_list": col_list
     })
 
 

@@ -11,6 +11,7 @@ from langchain.prompts.prompt import PromptTemplate
 from agents.extract_agent import lookup
 from agents.discrepancy_agent import lookup as getDis
 from agents.suggester_agent import generate_discrepancy_suggestions
+from agents.extract_tablename_agent import extract_tablename
 
 load_dotenv()
 
@@ -36,12 +37,11 @@ def dw_validation(name: str):
             return [], []
     print("generate_discrepancy_suggestions")
     result = generate_discrepancy_suggestions(table_name=name, discrepancies=discrepancy_json)
-    print("result is :")
-    print(result)
+   
 
     if not result:
         print("⚠️ No suggestions were generated. There might be no discrepancies or the LLM could not provide suggestions.")
-        return [], discrepancy_json
+        return [], discrepancy_json , {}
 
     # 👇 Convert stringified list to real Python list if needed
     if isinstance(result, str):
@@ -49,12 +49,18 @@ def dw_validation(name: str):
             result = json.loads(result)
         except json.JSONDecodeError as e:
             print("❌ Failed to decode LLM result as JSON:", e)
-            return [], discrepancy_json
+            return [], discrepancy_json , {}
 
     print("✅ Suggestions generated:\n")
-    print(result)
+    print(result['results'])
 
-    return result if isinstance(result, list) else [], discrepancy_json
+    return result['results'] if isinstance(result['results'], list) else [], discrepancy_json , result['expanded_sql_map']
+
+def getColumnList():
+        tables = extract_tablename()
+        print(tables)
+        return tables;
+ 
 
 if __name__ == "__main__":
     load_dotenv()

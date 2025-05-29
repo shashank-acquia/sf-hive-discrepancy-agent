@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 class RAGTool:    
     def __init__(self, doc_path: str = None):
-        self.doc_path = doc_path or "/Users/atharva.joshi/Desktop/sf-hive-discrepancy-agent/resources/prod-gcp/BELK-Track-2.docx"
+        self.doc_path = doc_path or "/Users/shashank.singh/Documents/mycode/sf-hive-discrepancy-agent/resources/rag/BELK-Track-2.docx"
         self.retriever = None
         self.chain = None
         self._initialize()

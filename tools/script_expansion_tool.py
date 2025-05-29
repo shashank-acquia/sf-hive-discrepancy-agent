@@ -109,10 +109,10 @@ class ScriptExpansionTool:
 
             return columns
             
-    def expand_column_pattern(self, match: re.Match) -> str:
+    def expand_column_pattern(self,match: re.Match) -> str:
         try:
-            full_match = match.group(0)         # e.g., ${columns:customer::c.%1$s AS %1$s}
-            pattern_content = match.group(1)    # e.g., columns:customer::c.%1$s AS %1$s
+            full_match = match.group(0)
+            pattern_content = match.group(1)
 
             parts = pattern_content.split(":")
             if len(parts) < 3 or parts[0].lower() != "columns":
@@ -120,48 +120,37 @@ class ScriptExpansionTool:
 
             table_name = parts[1].strip().lower()
             exclusions = []
-            format_str_parts = parts[2:]  # everything after table name
+            format_str_parts = parts[2:]
 
-            # Handle exclusion if it starts with ~
-            if parts[2].startswith("~"):
-                exclusion_part = parts[2][1:]
-                exclusions = [e.strip().upper() for e in exclusion_part.split(",") if e.strip()]
-                format_str_parts = parts[3:]
+            if format_str_parts and format_str_parts[0].startswith("~"):
+                exclusions = [e.strip().upper() for e in format_str_parts[0][1:].split(",") if e.strip()]
+                format_str_parts = format_str_parts[1:]
 
-            # Join remaining parts into format string
-            format_spec_str = ":".join(format_str_parts).rstrip("}")
+            format_spec_str = ":".join(format_str_parts).strip()
+            default_format = format_spec_str or "%1$s"
 
-            if not format_spec_str:
-                default_format = "%1$s"  # fallback
-            else:
-                format_types = format_spec_str.split(":")
-                default_format = format_types[0]
-                format_map = {}
-
-                for entry in format_types[1:]:
-                    tf_parts = entry.strip().split(" ")
-                    if len(tf_parts) == 2:
-                        format_map[tf_parts[0].lower()] = tf_parts[1]
-
-            # Get and filter columns
             columns = self.get_columns_for_table(table_name)
             if not columns:
+                print(f"[WARN] No columns found for table '{table_name}'")
                 return full_match
 
-            if exclusions:
-                columns = [col for col in columns if col['name'].upper() not in exclusions]
+            filtered_columns = [
+                col for col in columns
+                if col.get("name", "").strip().upper() not in exclusions
+            ]
 
             result = []
-            for col in columns:
-                col_name = col['name'].upper()
-                col_type = (col.get('type') or 'string').lower()
-                fmt = format_map.get(col_type, default_format)
-                result.append(fmt.replace("%1$s", col_name))
+            for col in filtered_columns:
+                col_name = col.get("name", "").strip().upper()
+                if not col_name:
+                    continue
+                formatted = default_format.replace("%1$s", col_name)
+                result.append(formatted)
 
-            return ",".join(result)
+            return ", ".join(result)
 
         except Exception as e:
-            print(f"Error expanding pattern {match.group(0)}: {e}")
+            print(f"[ERROR] Failed to expand pattern {match.group(0)}: {e}")
             return match.group(0)
             
     def expand_script(self, script_content: str) -> str:

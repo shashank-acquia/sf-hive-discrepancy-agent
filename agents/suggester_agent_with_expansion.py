@@ -53,7 +53,7 @@ def generate_discrepancy_suggestions_with_scripts(table_name: str, discrepancies
         Tool(
             name="SuggestFixesForDiscrepancy",
             func=discrepancy_suggester_with_scripts,
-            description="Given (table_name, discrepancies, expanded_scripts), suggests changes to Snowflake SQL to match Hive",
+            description="Given (table_name, discrepancies, expanded_scripts), suggests changes to Snowflake SQL to match Hive for all column",
             return_direct=True
         )
     ]

@@ -21,19 +21,29 @@
         }
 
         #tab-buttons {
-            display: flex;
-            justify-content: center;
-            margin-top: 2rem;
-        }
+    display: flex;
+    justify-content: center;
+    margin-top: 2rem;
+    margin-bottom: 1.5rem; 
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    padding: 1rem 0;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* subtle shadow on scroll */
+}
 
         .tab-button {
             padding: 0.75rem 1.5rem;
-            margin: 0 5px;
-            background-color: #eee;
+            margin: 0 0.5rem; 
             border: none;
             border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
+            transition: background-color 0.2s ease-in-out;
+        }
+
+        .tab-button:hover {
+            background-color: #ccc;
         }
 
         .tab-button.active {
@@ -42,20 +52,79 @@
         }
 
         .tab-content {
-            display: none;
-            margin-top: 1.5rem;
-        }
+    display: none;
+    margin: 2rem auto;
+    max-width: 900px;
+    filter: none;              /* Ensure no blur */
+    opacity: 1;                /* Ensure full opacity */
+    pointer-events: auto;      /* Make sure it’s interactable */
+    transition: opacity 0.3s ease-in-out;
+}
 
-        .tab-content.active {
-            display: block;
-        }
+  .tab-content.active {
+    display: block;
+    opacity: 1;                /* Ensure full visibility */
+    filter: none !important;   /* Override any potential blur filter */
+     }
 
         .card {
-            border: 1px solid #ccc;
+            border: 1px solid #ddd;
             border-radius: 8px;
             padding: 1em;
-            margin-bottom: 1em;
-            background-color: #f9f9f9;
+            margin-bottom: 1.5em;
+            background-color: #fafafa;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
+            transition: transform 0.2s ease;
+        }
+
+        .card:hover {
+            transform: scale(1.01);
+        }
+
+        pre {
+            max-height: 500px;
+            overflow: auto;
+            font-size: 0.9em;
+            line-height: 1.4;
+            background: #f0f0f0;
+            padding: 1em;
+            border-radius: 6px;
+            white-space: pre-wrap;
+        }
+
+        summary {
+            font-size: 1.05em;
+            font-weight: 600;
+            cursor: pointer;
+            color: #333;
+        }
+
+        details[open] summary {
+            color: #0056b3;
+        }
+
+        #discrepancies .card strong,
+        #summary .card strong {
+            display: inline-block;
+            width: 160px;
+            color: #333;
+        }
+
+        #expanded-scripts details {
+            margin-bottom: 1.2em;
+        }
+
+        #expanded-scripts summary {
+            background-color: #e9ecef;
+            padding: 0.6em 1em;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        #expanded-scripts summary:hover {
+            background-color: #d6dee4;
         }
     </style>
 </head>
@@ -64,8 +133,13 @@
         <img src="https://cdn-icons-png.flaticon.com/512/3039/3039384.png" alt="Logo">
         <h1>SF-HIVE Data Validation (LLM Agent)</h1>
         <form id="name-form">
-            <input type="text" name="name" placeholder="Enter Entity name">
-            <button id="magic-button" type="submit">Validate</button>
+            <select name="name" id="entity-dropdown" required style="width: 100%; padding: 0.75rem; font-size: 1rem; border-radius: 6px; border: 1px solid #ccc; margin-top: 1rem;">
+                <option value="">-- Select an Entity --</option>
+            </select>
+            
+            <button id="magic-button" type="submit" disabled style="width: 100%; padding: 0.75rem; font-size: 1.1rem; margin-top: 1rem; background-color: #333; color: white; border: none; border-radius: 6px; cursor: not-allowed;">
+                Validate
+            </button>
         </form>
     </header>
 
@@ -77,6 +151,7 @@
         <div id="tab-buttons">
             <button class="tab-button active" onclick="switchTab('discrepancy-tab')">Raw Discrepancies</button>
             <button class="tab-button" onclick="switchTab('suggestion-tab')">Suggestions</button>
+            <button class="tab-button" onclick="switchTab('expanded-tab')">Expanded Scripts</button>
         </div>
 
         <div id="discrepancy-tab" class="tab-content active">
@@ -86,12 +161,53 @@
         <div id="suggestion-tab" class="tab-content">
             <div id="summary"></div>
         </div>
+
+        <div id="expanded-tab" class="tab-content">
+            <div id="expanded-scripts"></div>
+        </div>
     </main>
 
     <script>
+
+
         const form = document.getElementById("name-form");
         const spinner = document.getElementById("spinner");
         const result = document.getElementById("result");
+        const dropdown = document.getElementById("entity-dropdown");
+       const validateBtn = document.getElementById("magic-button");
+
+
+        window.addEventListener("DOMContentLoaded", () => {
+    fetch("/metadata")
+        .then(res => res.json())
+        .then(data => {
+            const dropdown = document.getElementById("entity-dropdown");
+            const rawList = data.col_list || "";
+            const colList = rawList.split(",").map(s => s.trim()).filter(Boolean);
+
+            colList.forEach(item => {
+                const option = document.createElement("option");
+                option.value = item;
+                option.textContent = item;
+                dropdown.appendChild(option);
+            });
+        })
+        .catch(err => {
+            alert("Failed to load metadata: " + err);
+        });
+});
+
+dropdown.addEventListener("change", () => {
+    if (dropdown.value) {
+        validateBtn.disabled = false;
+        validateBtn.style.cursor = "pointer";
+        validateBtn.style.backgroundColor = "#007BFF"; // blue when active
+    } else {
+        validateBtn.disabled = true;
+        validateBtn.style.cursor = "not-allowed";
+        validateBtn.style.backgroundColor = "#333"; // dark when inactive
+    }
+});
 
         form.addEventListener("submit", (ev) => {
             ev.preventDefault();
@@ -117,11 +233,10 @@
                                 <strong>Column:</strong> ${item.column}<br>
                                 <strong>Hive Value (Expected):</strong> ${item.hive_val}<br>
                                 <strong>Snowflake Value (Actual):</strong> ${item.snowflake_val}<br>
-                                <strong>Column:</strong> ${item.column}<br>
                                 <strong>Hive File:</strong> ${item.hive_file}<br>
                                 <strong>Snowflake File:</strong> ${item.snowflake_file}<br>
                                 <strong>Suggestion:</strong>
-                                <pre style="background:#f0f0f0; padding: 0.5em; border-radius: 4px;">${item.suggestion}</pre>
+                                <pre>${item.suggestion}</pre>
                             `;
                             summaryContainer.appendChild(card);
                         });
@@ -148,6 +263,31 @@
                                 <strong>Impacted IDs:</strong> ${ids}
                             `;
                             discrepanciesContainer.appendChild(card);
+                        });
+                    }
+
+                    const expandedContainer = document.getElementById("expanded-scripts");
+                    expandedContainer.innerHTML = "";
+
+                    const expandedMap = data.expanded_scr_map || {};
+                    const fileNames = Object.keys(expandedMap);
+
+                    if (fileNames.length === 0) {
+                        expandedContainer.textContent = "No expanded scripts found.";
+                    } else {
+                        fileNames.forEach((fileName) => {
+                            const card = document.createElement("div");
+                            card.className = "card";
+
+                            const contentId = `script-${btoa(fileName).replace(/[^a-zA-Z0-9]/g, "")}`;
+
+                            card.innerHTML = `
+                                <details>
+                                    <summary>${fileName}</summary>
+                                    <pre id="${contentId}">${expandedMap[fileName]}</pre>
+                                </details>
+                            `;
+                            expandedContainer.appendChild(card);
                         });
                     }
 
