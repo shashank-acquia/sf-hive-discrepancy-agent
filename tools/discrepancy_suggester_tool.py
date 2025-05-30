@@ -59,13 +59,28 @@ def match_file_pairs(hive_files: dict, snowflake_files: dict) -> List[tuple]:
 
     return matched_pairs
 
-def read_files_by_extension(folder_path: str, extension: str) -> dict:
+def read_files_by_extension(folder_path: str, extension: str, table_name: str) -> dict:
+    # Determine the subdirectory to append based on the file extension
+    if extension.lower() == ".sql":
+        subdirectory = f"sf_dw_{table_name.lower()}"
+    elif extension.lower() == ".hql":
+        subdirectory = f"nw_{table_name.lower()}"
+    else:
+        subdirectory = ""
+
+    # Append the subdirectory to the folder path
+    full_path = os.path.join(folder_path, subdirectory)
+
     file_map = {}
-    for file_name in os.listdir(folder_path):
-        if file_name.lower().endswith(extension):
-            with open(os.path.join(folder_path, file_name), "r") as f:
-                file_map[file_name] = f.read()
+    # Ensure the directory exists before attempting to list files
+    if os.path.exists(full_path) and os.path.isdir(full_path):
+        for file_name in os.listdir(full_path):
+            if file_name.lower().endswith(extension):
+                with open(os.path.join(full_path, file_name), "r") as f:
+                    file_map[file_name] = f.read()
+
     return file_map
+
 
 def extract_relevant_sql(sql_text: str, column: str, context_lines: int = 50) -> str:
     lines = sql_text.splitlines()
@@ -76,6 +91,10 @@ def extract_relevant_sql(sql_text: str, column: str, context_lines: int = 50) ->
             end = min(idx + context_lines + 1, len(lines))
             return "\n".join(lines[start:end])
     return ""
+
+def escape_curly_braces(text: str) -> str:
+    # Escape all {placeholder} that are NOT already escaped (i.e., not already {{...}})
+    return re.sub(r'(?<!{){([^{}]+)}(?!})', r'{{\1}}', text)
 
 def ask_llm_to_fix(column: str, hive_snippet: str, snowflake_snippet: str, hive_val: str, sf_val: str, hive_file: str, sf_file: str) -> str:
 
@@ -108,7 +127,7 @@ def ask_llm_to_fix(column: str, hive_snippet: str, snowflake_snippet: str, hive_
      column, hive_snippet, snowflake_snippet,
     hive_val, sf_val, hive_file, sf_file
    ],
-    template=prompt,
+    template=escape_curly_braces(prompt),
    )
     chain = prompt_template | llm
     logger.info("🚀 Invoking LLM...")
@@ -175,14 +194,14 @@ def discrepancy_suggester(input_data: dict) -> str:
     except Exception as e:
         return f"❌ Failed to extract input: {e}"
 
-    hive_files = read_files_by_extension(HIVE_SCRIPT_DIR, ".hql")
-    snowflake_files = read_files_by_extension(SNOWFLAKE_SCRIPT_DIR, ".sql")
+    hive_files = read_files_by_extension(HIVE_SCRIPT_DIR, ".hql",table_name)
+    snowflake_files = read_files_by_extension(SNOWFLAKE_SCRIPT_DIR, ".sql",table_name)
     matched_pairs = match_file_pairs(hive_files, snowflake_files)
 
     logger.info(f"📄 Matched file pairs: {matched_pairs}")
     metadata_dir = os.getenv("METADATA_DIR")
     expander = ScriptExpansionTool(metadata_dir)
-    results = []
+    results = {}
     expanded_sql_map = {}  
     
     for entry in discrepancies:
@@ -220,7 +239,9 @@ def discrepancy_suggester(input_data: dict) -> str:
                 # )
 
                 logger.info(f"✅ Generated suggestion for column: {column}, files: ({hive_file}, {sf_file})")
-                results.append({
+                if column not in results:
+                  results[column] = []
+                results[column].append({
                     "column": column,
                     "hive_val": hive_val,
                     "snowflake_val": snowflake_val,
