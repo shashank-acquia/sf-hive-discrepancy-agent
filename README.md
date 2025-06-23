@@ -53,7 +53,9 @@ Configure the agent by setting the following environment variables:
 - `HIVE_SCRIPT_DIR` - Path to directory containing Hive SQL scripts
 - `SNOWFLAKE_SCRIPT_DIR` - Path to directory containing Snowflake SQL scripts
 - `OPENAI_API_KEY` - Your OpenAI API key for LLM integration
+- `SNOWFLAKE_ROLE` - Snowflake ROLE name
 - `METADATA_DIR` - (Optional) Path to directory containing metadata CSV files for script expansion
+- `MODE` - TESTING or PROD
 
 ## Script Expansion Feature
 

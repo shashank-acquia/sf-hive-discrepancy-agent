@@ -18,7 +18,7 @@ def generate_discrepancy_suggestions(table_name: str, discrepancies: dict) -> st
         Tool(
             name="SuggestFixesForDiscrepancy",
             func=discrepancy_suggester,
-            description="Given (table_name, discrepancies), suggests changes to Snowflake SQL to match Hive",
+            description="Given (table_name, and array of discrepancies json), suggests changes to Snowflake SQL to match Hive",
             return_direct=True
         )
     ]
