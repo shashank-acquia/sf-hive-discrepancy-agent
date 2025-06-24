@@ -38,10 +38,11 @@ def convert():
     })
 @app.route("/metadata", methods=["GET"])
 def metadata():
-    col_list = getColumnList()
+    col_list,df_html = getColumnList()
 
     return jsonify({
-        "col_list": col_list
+        "col_list": col_list,
+        "df_html": df_html
     })
 
 

@@ -4,15 +4,24 @@ from langchain import hub
 from langchain_core.tools import Tool
 from langchain_community.chat_models import ChatOpenAI
 from tools.fetch_tables_tool import fetch_tables_tool
-from typing import List
+from typing import List, Tuple, Union
+import pandas as pd
 
+# Load environment variables from a .env file
 load_dotenv()
 
-def extract_tablename() -> List[str]:
-    # Use OpenAI or Ollama as needed
-    llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
-    # llm = OllamaLLM(model="llama3.1:8b")  # Optional alternative
+def extract_tablename() -> Union[Tuple[pd.DataFrame, str], None]:
+    """
+    Extracts table names with discrepancies using a language model agent.
 
+    Returns:
+        A tuple containing the DataFrame and a string of table names with discrepancies,
+        or None if an error occurs.
+    """
+    # Initialize the language model (LLM) with specified parameters
+    llm = ChatOpenAI(temperature=0, model_name="gpt-3.5-turbo")
+
+    # Define the tool for the agent to use
     tools_for_agent = [
         Tool(
             name="ExtractTables",
@@ -22,17 +31,38 @@ def extract_tablename() -> List[str]:
         )
     ]
 
-    # Use default react prompt from LangChain Hub
+    # Pull the default react prompt from LangChain Hub
     react_prompt = hub.pull("hwchase17/react")
 
+    # Create the agent with the specified LLM, tools, and prompt
     agent = create_react_agent(llm=llm, tools=tools_for_agent, prompt=react_prompt)
+
+    # Create an executor for the agent
     agent_executor = AgentExecutor(agent=agent, tools=tools_for_agent, verbose=True)
 
-    # Call the agent with an empty input (unless you need to provide specific inputs)
-    result = agent_executor.invoke({"input": "Which tables have discrepancies?"})
-
-    # result will be a dict with "output" key if return_direct=True
-    return result["output"] if isinstance(result, dict) else result
+    # Invoke the agent with a specific input
+    try:
+        result = agent_executor.invoke({"input": "Which tables have discrepancies?"})
+        
+        # Check if the result is a tuple and contains a DataFrame and string
+        if isinstance(result['output'], tuple) and len(result['output']) == 2:
+            df = result['output'][0]
+            table_names_str = result['output'][1]
+            if isinstance(df, pd.DataFrame) and isinstance(table_names_str, str):
+                return df, table_names_str
+        return None
+    except Exception as e:
+        print(f"Error invoking agent: {e}")
+        return None
 
 if __name__ == "__main__":
-    print(extract_tablename())
+    # Fetch and print the extracted table names and DataFrame
+    output = extract_tablename()
+    if output:
+        df, table_names_str = output
+        print("DataFrame:")
+        print(df)
+        print("\nTable Names:")
+        print(table_names_str)
+    else:
+        print("No discrepancies found or an error occurred.")

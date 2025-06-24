@@ -1,4 +1,4 @@
-def fetch_tables_tool(_input: str = "") -> str:
+def fetch_tables_tool(_input: str = "") -> tuple:
     import pandas as pd
     from io import StringIO
     from tools.snowflake_tool import fetch_metrics_table
@@ -16,4 +16,4 @@ def fetch_tables_tool(_input: str = "") -> str:
     table_names = df1["TABLE_NAME"].unique().tolist()
 
     # Return as a clean comma-separated string (LLMs handle this format better)
-    return ", ".join(table_names)
+    return df1,", ".join(table_names)

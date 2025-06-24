@@ -57,9 +57,16 @@ def dw_validation(name: str):
     return result['results'], discrepancy_json, result['expanded_sql_map']
 
 def getColumnList():
-        tables = extract_tablename()
-        print(tables)
-        return tables;
+    df, tables = extract_tablename()
+    print("DataFrame with discrepancies:")
+    print(df)
+    print("Table Names:")
+    print(tables)
+    table_html = df.to_html(classes='data', header="true", index=False)
+    print("HTML representation of the DataFrame:")
+    print(table_html)
+    
+    return tables,table_html
 
 def getConvertedScript(script: str):
         output = script_converter_suggestions(script=script)

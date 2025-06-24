@@ -259,6 +259,54 @@ border: 1px solid #ccc;
 box-sizing: border-box;
 
 }
+
+#matrix {
+    width: 100%;
+    margin: 0; /* Remove any margin to occupy full width */
+    overflow-x: auto; /* Enable horizontal scrolling for large tables */
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 1rem;
+    background-color: #f9f9f9;
+}
+
+#matrix table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0;
+    font-size: 1rem;
+}
+
+#matrix th, #matrix td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid #ddd;
+}
+
+#matrix th {
+    background-color: #f2f2f2;
+    font-weight: bold;
+}
+
+#matrix tr:hover {
+    background-color: #f1f1f1;
+}
+
+#matrix th, #matrix td {
+    white-space: nowrap; /* Prevent text from wrapping */
+}
+
+@media (max-width: 600px) {
+    #matrix {
+        padding: 0.5rem;
+    }
+
+    #matrix th, #matrix td {
+        padding: 0.5rem;
+        font-size: 0.9rem;
+    }
+}
   </style>
 </head>
 <body>
@@ -293,21 +341,26 @@ box-sizing: border-box;
       </form>
     </header>
 
+   
+
     <div id="spinner" style="text-align: center; display: none">
       <span class="three-quarters-loader" style="width: 100px; height: 100px; border-radius: 50%; border-width: 12px;"></span>
     </div>
 
     <main id="result" style="display: none">
       <div id="tab-buttons">
-        <button class="tab-button active" onclick="switchTab('discrepancy-tab')">Raw Discrepancies</button>
+        <button class="tab-button active" onclick="switchTab('matrix-tab')">Matrix</button>
+        <button class="tab-button" onclick="switchTab('discrepancy-tab')">Raw Discrepancies</button>
         <button class="tab-button" onclick="switchTab('suggestion-tab')">Suggestions</button>
         <button class="tab-button" onclick="switchTab('expanded-tab')">Expanded Scripts</button>
       </div>
 
-      <div id="discrepancy-tab" class="tab-content active">
+      <div id="matrix-tab" class="tab-content active">
+        <div id="matrix"></div>
+      </div>
+      <div id="discrepancy-tab" class="tab-content">
         <div id="discrepancies"></div>
       </div>
-
       <div id="suggestion-tab" class="tab-content">
         <div id="summary"></div>
       </div>
@@ -339,6 +392,7 @@ box-sizing: border-box;
     const spinner = document.getElementById("spinner");
     const result = document.getElementById("result");
     const dropdown = document.getElementById("entity-dropdown");
+    const matrix = document.getElementById("matrix");
     const validateBtn = document.getElementById("magic-button");
 
     let metadataLoaded = false;
@@ -359,6 +413,7 @@ box-sizing: border-box;
           });
 
           document.getElementById("dropdown-spinner").style.display = "none";
+          document.getElementById("matrix").innerHTML = data.df_html;
           dropdown.style.display = "block";
           metadataLoaded = true;
         })
