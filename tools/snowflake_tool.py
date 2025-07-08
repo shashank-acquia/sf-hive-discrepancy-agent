@@ -41,7 +41,7 @@ class DWValidationConfig:
     def getMismatchQuery(self, table_name: str, id_val: str):
         table_name_suffix = "_RK" if self.mode == "TESTING" else ""
         return f"""
-            CALL sandbox.COMPARE_MISMATCH_IGNORE_EXCLUDED_COL1(
+            CALL sandbox.COMPARE_MISMATCH_IGNORE_EXCLUDED_COL(
                 '{self.snowflake_hive_schema}',
                 '{self.snowflake_dw_schema}',
                 '{table_name}{table_name_suffix}',
