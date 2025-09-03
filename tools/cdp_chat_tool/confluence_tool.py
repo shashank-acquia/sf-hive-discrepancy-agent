@@ -1,8 +1,11 @@
 import os
 import requests
 from requests.auth import HTTPBasicAuth
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from typing import List, Dict, Optional
 import logging
+import time
 from atlassian import Confluence
 
 logger = logging.getLogger(__name__)
@@ -12,15 +15,36 @@ class ConfluenceTool:
         self.server = os.getenv('CONFLUENCE_SERVER')
         self.username = os.getenv('CONFLUENCE_USERNAME')
         self.api_token = os.getenv('CONFLUENCE_API_TOKEN')
+        self.spaces = self._parse_spaces(os.getenv('CONFLUENCE_SPACES', ''))
+        self.max_retries = 3
+        self.retry_delay = 1  # seconds
         
         if self.server and self.username and self.api_token:
             try:
+                # Create a session with retry strategy
+                session = requests.Session()
+                retry_strategy = Retry(
+                    total=3,
+                    status_forcelist=[429, 500, 502, 503, 504],
+                    allowed_methods=["HEAD", "GET", "OPTIONS", "POST"],  # Updated parameter name
+                    backoff_factor=1
+                )
+                adapter = HTTPAdapter(max_retries=retry_strategy)
+                session.mount("http://", adapter)
+                session.mount("https://", adapter)
+                
                 self.confluence = Confluence(
                     url=self.server,
                     username=self.username,
                     password=self.api_token,
-                    cloud=True  # Set to False for Confluence Server
+                    cloud=True,  # Set to False for Confluence Server
+                    session=session,
+                    timeout=30  # 30 second timeout
                 )
+                
+                # Test the connection
+                self._test_connection()
+                
             except Exception as e:
                 logger.error(f"Failed to initialize Confluence client: {e}")
                 self.confluence = None
@@ -28,14 +52,58 @@ class ConfluenceTool:
             logger.warning("Confluence credentials not found in environment variables")
             self.confluence = None
     
+    def _test_connection(self):
+        """Test the Confluence connection"""
+        try:
+            if self.confluence:
+                # Try a simple CQL query as a connection test
+                test_results = self.confluence.cql('type = page', limit=1)
+                logger.info(f"Successfully connected to Confluence - test query returned {len(test_results.get('results', []))} results")
+                return True
+        except Exception as e:
+            logger.error(f"Confluence connection test failed: {e}")
+            return False
+        return False
+    
+    def _execute_with_retry(self, func, *args, **kwargs):
+        """Execute a function with retry logic"""
+        last_exception = None
+        
+        for attempt in range(self.max_retries):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                last_exception = e
+                error_msg = str(e).lower()
+                
+                # Check if it's a retryable error
+                if any(error_type in error_msg for error_type in [
+                    'connection aborted', 'remote disconnected', 'timeout', 
+                    'connection reset', 'connection refused', 'read timeout'
+                ]):
+                    if attempt < self.max_retries - 1:
+                        wait_time = self.retry_delay * (2 ** attempt)  # Exponential backoff
+                        logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                        continue
+                
+                # If it's not retryable or we've exhausted retries, raise the exception
+                logger.error(f"Non-retryable error or max retries exceeded: {e}")
+                raise e
+        
+        # If we get here, all retries failed
+        raise last_exception
+    
     def search_content(self, query: str, limit: int = 20) -> List[Dict]:
         """Search for content in Confluence"""
         if not self.confluence:
+            logger.warning("Confluence client not initialized")
             return []
         
-        try:
+        def _search():
             # Use CQL (Confluence Query Language) for search
             cql_query = f'text ~ "{query}"'
+            logger.info(f"Executing Confluence search with query: {cql_query}")
             
             results = self.confluence.cql(cql_query, limit=limit)
             
@@ -55,8 +123,11 @@ class ConfluenceTool:
                     })
             
             return content_list
+        
+        try:
+            return self._execute_with_retry(_search)
         except Exception as e:
-            logger.error(f"Error searching Confluence content: {e}")
+            logger.error(f"Error searching Confluence content after retries: {e}")
             return []
     
     def search_in_space(self, query: str, space_key: str, limit: int = 10) -> List[Dict]:
@@ -229,6 +300,73 @@ class ConfluenceTool:
         keywords = [word for word in words if word not in stop_words and len(word) > 2]
         
         return ' '.join(keywords[:10])
+    
+    def _parse_spaces(self, spaces_str: str) -> List[str]:
+        """Parse comma-separated spaces from environment variable"""
+        if not spaces_str:
+            return []
+        return [space.strip() for space in spaces_str.split(',') if space.strip()]
+    
+    def search_in_configured_spaces(self, query: str, limit: int = 20) -> List[Dict]:
+        """Search for content in all configured Confluence spaces"""
+        if not self.confluence or not self.spaces:
+            logger.warning("No spaces configured or Confluence client not initialized")
+            return []
+        
+        all_results = []
+        results_per_space = max(1, limit // len(self.spaces))
+        
+        for space in self.spaces:
+            try:
+                space_results = self.search_in_space(query, space, results_per_space)
+                all_results.extend(space_results)
+                logger.info(f"Found {len(space_results)} results in space '{space}'")
+            except Exception as e:
+                logger.error(f"Error searching in space '{space}': {e}")
+                continue
+        
+        # Remove duplicates and sort by relevance
+        unique_results = []
+        seen_ids = set()
+        
+        for result in all_results:
+            if result.get('id') not in seen_ids:
+                unique_results.append(result)
+                seen_ids.add(result.get('id'))
+        
+        return unique_results[:limit]
+    
+    def search_in_multiple_spaces(self, query: str, space_keys: List[str], limit: int = 20) -> List[Dict]:
+        """Search for content in multiple specified Confluence spaces"""
+        if not self.confluence or not space_keys:
+            return []
+        
+        all_results = []
+        results_per_space = max(1, limit // len(space_keys))
+        
+        for space_key in space_keys:
+            try:
+                space_results = self.search_in_space(query, space_key, results_per_space)
+                all_results.extend(space_results)
+                logger.info(f"Found {len(space_results)} results in space '{space_key}'")
+            except Exception as e:
+                logger.error(f"Error searching in space '{space_key}': {e}")
+                continue
+        
+        # Remove duplicates and sort by relevance
+        unique_results = []
+        seen_ids = set()
+        
+        for result in all_results:
+            if result.get('id') not in seen_ids:
+                unique_results.append(result)
+                seen_ids.add(result.get('id'))
+        
+        return unique_results[:limit]
+    
+    def get_configured_spaces(self) -> List[str]:
+        """Get the list of configured spaces"""
+        return self.spaces.copy()
     
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """Simple similarity calculation based on common words"""

@@ -1554,12 +1554,16 @@ Please provide a comprehensive analysis and summary of these search results.
             
             slack_tool = SlackTool()
             
-            # Get channel and timestamp from result
+            # Get channel and timestamp from result - check both 'timestamp' and 'ts' fields
             channel = result.get('metadata', {}).get('channel', '')
-            timestamp = result.get('metadata', {}).get('timestamp', '')
+            timestamp = result.get('metadata', {}).get('timestamp', '') or result.get('metadata', {}).get('ts', '')
             
-            if not channel or not timestamp:
-                logger.warning("Missing channel or timestamp for Slack thread extraction")
+            if not channel:
+                logger.warning(f"Missing channel for Slack thread extraction. Available metadata: {list(result.get('metadata', {}).keys())}")
+                return None
+            
+            if not timestamp:
+                logger.warning(f"Missing timestamp for Slack thread extraction. Available metadata: {list(result.get('metadata', {}).keys())}")
                 return None
             
             # Get channel ID
@@ -1618,11 +1622,11 @@ Please provide a comprehensive analysis and summary of these search results.
             
             confluence_tool = ConfluenceTool()
             
-            # Get page ID from result metadata
-            page_id = result.get('metadata', {}).get('id', '')
+            # Get page ID from result metadata - check multiple possible locations
+            page_id = result.get('metadata', {}).get('id', '') or result.get('id', '')
             
             if not page_id:
-                logger.warning("Missing page ID for Confluence content extraction")
+                logger.warning(f"Missing page ID for Confluence content extraction. Available metadata: {list(result.get('metadata', {}).keys())}, Available result keys: {list(result.keys())}")
                 return None
             
             # Get full page content
