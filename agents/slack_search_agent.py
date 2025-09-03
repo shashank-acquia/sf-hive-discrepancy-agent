@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 from typing import Dict, List, Optional
 try:
@@ -80,33 +81,53 @@ class SlackSearchAgent:
             }
     
     def _search_all_platforms(self, query: str) -> Dict:
-        """Search across Jira, Slack, and Confluence"""
+        """Enhanced search across Jira, Slack, and Confluence with thread workaround"""
         results = {
             'jira_issues': [],
             'slack_messages': [],
-            'confluence_pages': []
+            'confluence_pages': [],
+            'search_strategies': []
         }
         
-        # Search Jira for similar issues
-        try:
-            jira_results = self.jira_tool.get_similar_issues(query, max_results=5)
-            results['jira_issues'] = jira_results
-            logger.info(f"Found {len(jira_results)} similar Jira issues")
-        except Exception as e:
-            logger.error(f"Error searching Jira: {e}")
-        
-        # Search Slack channels
+        # Search Slack channels first
         try:
             if self.search_channels and self.search_channels[0]:  # Check if channels are configured
                 slack_results = self.slack_tool.search_in_channels(
                     query=query,
                     channels=[ch.strip() for ch in self.search_channels if ch.strip()],
-                    limit=5
+                    limit=10
                 )
                 results['slack_messages'] = slack_results
                 logger.info(f"Found {len(slack_results)} relevant Slack messages")
+                
+                # Enhanced JIRA search based on Slack message content
+                enhanced_jira_results = self._enhanced_jira_search_from_slack(query, slack_results)
+                results['jira_issues'].extend(enhanced_jira_results)
+                
         except Exception as e:
             logger.error(f"Error searching Slack: {e}")
+        
+        # Direct JIRA search
+        try:
+            direct_jira_results = self.jira_tool.get_similar_issues(query, max_results=5)
+            for ticket in direct_jira_results:
+                ticket['search_strategy'] = 'direct_query'
+                ticket['relevance_score'] = ticket.get('similarity_score', 0) * 100
+            results['jira_issues'].extend(direct_jira_results)
+            logger.info(f"Found {len(direct_jira_results)} similar Jira issues via direct search")
+        except Exception as e:
+            logger.error(f"Error searching Jira: {e}")
+        
+        # Deduplicate and sort JIRA results by relevance
+        unique_tickets = {}
+        for ticket in results['jira_issues']:
+            key = ticket.get('key')
+            if key:
+                if key not in unique_tickets or ticket.get('relevance_score', 0) > unique_tickets[key].get('relevance_score', 0):
+                    unique_tickets[key] = ticket
+        
+        sorted_tickets = sorted(unique_tickets.values(), key=lambda x: x.get('relevance_score', 0), reverse=True)
+        results['jira_issues'] = sorted_tickets[:10]  # Top 10 results
         
         # Search Confluence (optional - gracefully handle if not available)
         try:
@@ -120,7 +141,250 @@ class SlackSearchAgent:
             logger.warning(f"Confluence search unavailable (user may not have access): {e}")
             # Continue without Confluence - this is not a critical error
         
+        # Generate platform insights
+        results['platform_insights'] = self._generate_platform_insights(results)
+        
         return results
+    
+    def _generate_platform_insights(self, search_results: Dict) -> Dict:
+        """Generate platform-specific insights based on search results"""
+        insights = {}
+        
+        # JIRA Insights
+        jira_issues = search_results.get('jira_issues', [])
+        jira_insights = []
+        jira_summary = "No JIRA results found"
+        
+        if jira_issues:
+            # Count by status, priority, and project
+            status_counts = {}
+            priority_counts = {}
+            project_counts = {}
+            
+            for issue in jira_issues:
+                status = issue.get('status', 'Unknown')
+                priority = issue.get('priority', 'Unknown')
+                project = issue.get('project', issue.get('key', 'Unknown').split('-')[0] if issue.get('key') else 'Unknown')
+                
+                status_counts[status] = status_counts.get(status, 0) + 1
+                priority_counts[priority] = priority_counts.get(priority, 0) + 1
+                project_counts[project] = project_counts.get(project, 0) + 1
+            
+            # Calculate detailed metrics
+            total_issues = len(jira_issues)
+            closed_issues = sum(count for status, count in status_counts.items() if status.lower() in ['closed', 'resolved', 'done'])
+            open_issues = sum(count for status, count in status_counts.items() if status.lower() in ['open', 'in progress', 'to do', 'new'])
+            high_priority_issues = sum(count for priority, count in priority_counts.items() if priority.lower() in ['high', 'critical', 'blocker'])
+            
+            jira_insights.append(f"Found {total_issues} relevant JIRA tickets")
+            if closed_issues > 0:
+                jira_insights.append(f"{closed_issues} tickets are resolved (likely contain solutions)")
+            
+            # Top status
+            if status_counts:
+                top_status = max(status_counts.items(), key=lambda x: x[1])
+                jira_insights.append(f"Most common status: {top_status[0]} ({top_status[1]} tickets)")
+            
+            # Top priority
+            if priority_counts:
+                top_priority = max(priority_counts.items(), key=lambda x: x[1])
+                jira_insights.append(f"Most common priority: {top_priority[0]} ({top_priority[1]} tickets)")
+            
+            # Top project
+            if project_counts:
+                top_project = max(project_counts.items(), key=lambda x: x[1])
+                jira_insights.append(f"Most tickets from project: {top_project[0]} ({top_project[1]} tickets)")
+            
+            # Check for high relevance tickets
+            high_relevance = [issue for issue in jira_issues if issue.get('relevance_score', 0) > 50]
+            if high_relevance:
+                jira_insights.append(f"{len(high_relevance)} tickets have high relevance scores")
+            
+            jira_summary = f"Found {total_issues} JIRA tickets, {closed_issues} resolved"
+        
+        insights['jira'] = {
+            'insights': jira_insights,
+            'count': len(jira_issues),
+            'total_count': total_issues if jira_issues else 0,
+            'open_count': open_issues if jira_issues else 0,
+            'closed_count': closed_issues if jira_issues else 0,
+            'high_priority_count': high_priority_issues if jira_issues else 0,
+            'summary': jira_summary
+        }
+        
+        # Slack Insights
+        slack_messages = search_results.get('slack_messages', [])
+        slack_insights = []
+        slack_summary = "No Slack results found"
+        
+        if slack_messages:
+            # Count by channel
+            channel_counts = {}
+            thread_count = 0
+            
+            for msg in slack_messages:
+                channel = msg.get('channel', 'Unknown')
+                channel_counts[channel] = channel_counts.get(channel, 0) + 1
+                
+                if msg.get('reply_count', 0) > 0 or msg.get('thread_summary'):
+                    thread_count += 1
+            
+            total_messages = len(slack_messages)
+            slack_insights.append(f"Found {total_messages} relevant Slack messages")
+            
+            if thread_count > 0:
+                slack_insights.append(f"{thread_count} messages have thread discussions")
+            
+            # Top channel
+            if channel_counts:
+                top_channel = max(channel_counts.items(), key=lambda x: x[1])
+                slack_insights.append(f"Most messages from #{top_channel[0]} ({top_channel[1]} messages)")
+            
+            # Check for recent activity
+            recent_messages = [msg for msg in slack_messages if msg.get('timestamp', 0) > 0]
+            if recent_messages:
+                slack_insights.append(f"Found recent discussions about this topic")
+            
+            slack_summary = f"Found {total_messages} Slack messages across {len(channel_counts)} channels"
+        
+        insights['slack'] = {
+            'insights': slack_insights,
+            'count': len(slack_messages),
+            'summary': slack_summary
+        }
+        
+        # Confluence Insights
+        confluence_pages = search_results.get('confluence_pages', [])
+        confluence_insights = []
+        confluence_summary = "No Confluence results found"
+        
+        if confluence_pages:
+            # Count by space
+            space_counts = {}
+            
+            for page in confluence_pages:
+                space = page.get('space', 'Unknown')
+                space_counts[space] = space_counts.get(space, 0) + 1
+            
+            total_pages = len(confluence_pages)
+            confluence_insights.append(f"Found {total_pages} relevant Confluence pages")
+            
+            # Top space
+            if space_counts:
+                top_space = max(space_counts.items(), key=lambda x: x[1])
+                confluence_insights.append(f"Most pages from space: {top_space[0]} ({top_space[1]} pages)")
+            
+            confluence_summary = f"Found {total_pages} Confluence pages across {len(space_counts)} spaces"
+        
+        insights['confluence'] = {
+            'insights': confluence_insights,
+            'count': len(confluence_pages),
+            'summary': confluence_summary
+        }
+        
+        return insights
+    
+    def _enhanced_jira_search_from_slack(self, query: str, slack_messages: List[Dict]) -> List[Dict]:
+        """Enhanced JIRA search based on Slack message content analysis"""
+        enhanced_jira_results = []
+        
+        for msg in slack_messages:
+            logger.info(f"Analyzing Slack message from #{msg.get('channel')} at {msg.get('ts')}")
+            
+            # Extract error details and search JIRA for similar errors
+            error_details = self._extract_error_details(msg.get('text', ''))
+            if error_details:
+                logger.info(f"Extracted error details: {error_details}")
+                
+                # Search JIRA for tickets containing these error details
+                for error_term in error_details:
+                    try:
+                        jira_tickets = self.jira_tool.get_similar_issues(error_term, max_results=3)
+                        for ticket in jira_tickets:
+                            ticket['search_strategy'] = f'error_term: {error_term}'
+                            ticket['relevance_score'] = self._calculate_relevance(ticket, error_details)
+                            enhanced_jira_results.append(ticket)
+                    except Exception as e:
+                        logger.warning(f"Error searching JIRA for term '{error_term}': {e}")
+            
+            # Extract job details and search for related tickets
+            job_details = self._extract_job_details(msg.get('text', ''))
+            if job_details:
+                logger.info(f"Extracted job details: {job_details}")
+                
+                for job_term in job_details:
+                    try:
+                        jira_tickets = self.jira_tool.get_similar_issues(job_term, max_results=3)
+                        for ticket in jira_tickets:
+                            ticket['search_strategy'] = f'job_term: {job_term}'
+                            ticket['relevance_score'] = self._calculate_relevance(ticket, job_details)
+                            enhanced_jira_results.append(ticket)
+                    except Exception as e:
+                        logger.warning(f"Error searching JIRA for job term '{job_term}': {e}")
+        
+        return enhanced_jira_results
+    
+    def _extract_error_details(self, text: str) -> List[str]:
+        """Extract specific error details from Slack message"""
+        error_terms = []
+        
+        # Extract specific error messages
+        error_patterns = [
+            r'error_message\s*([^]]+)',  # error_message content
+            r'SnowflakeExecutorException:\s*([^|]+)',  # Snowflake exceptions
+            r'Timestamp\s+\'([^\']+)\'\s+is\s+not\s+recognized',  # Timestamp errors
+            r'error-code\s+(\d+)',  # Error codes
+            r'queryId\s+([a-f0-9-]+)',  # Query IDs
+        ]
+        
+        for pattern in error_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            error_terms.extend(matches)
+        
+        # Also extract the main error components
+        if 'SF_DW_MAPPER_DEFAULT' in text:
+            error_terms.append('SF_DW_MAPPER_DEFAULT')
+        
+        if 'JCrew' in text:
+            error_terms.append('JCrew')
+        
+        if re.search(r'\b1086\b', text):
+            error_terms.append('1086')
+        
+        return [term.strip() for term in error_terms if term.strip()]
+    
+    def _extract_job_details(self, text: str) -> List[str]:
+        """Extract job/workflow details from Slack message"""
+        job_terms = []
+        
+        # Extract job-related information
+        job_patterns = [
+            r'Job ID\s*:\s*([^\n]+)',  # Job IDs
+            r'SF_DW_MAPPER_DEFAULT',   # Job name
+            r'JCrew\s*\((\d+)\)',      # Tenant info
+            r'Status Detail:\s*([^\n]+)',  # Status details
+        ]
+        
+        for pattern in job_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            job_terms.extend(matches)
+        
+        return [term.strip() for term in job_terms if term.strip()]
+    
+    def _calculate_relevance(self, ticket: Dict, search_terms: List[str]) -> float:
+        """Calculate relevance score based on how many search terms appear in the ticket"""
+        score = 0
+        ticket_text = (ticket.get('summary', '') + ' ' + ticket.get('description', '')).lower()
+        
+        for term in search_terms:
+            if term.lower() in ticket_text:
+                score += 10
+        
+        # Bonus for closed tickets (likely resolved)
+        if ticket.get('status', '').lower() in ['closed', 'resolved', 'done']:
+            score += 5
+        
+        return score
     
     def _generate_llm_response(self, original_message: str, search_results: Dict) -> str:
         """Generate a formatted response using LLM"""

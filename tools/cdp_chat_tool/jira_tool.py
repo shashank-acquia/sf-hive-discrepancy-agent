@@ -1,4 +1,5 @@
 import os
+import re
 from jira import JIRA
 from typing import List, Dict, Optional
 import logging
@@ -32,10 +33,11 @@ class JiraTool:
             return []
         
         try:
-            # If query doesn't look like JQL, create a text search
+            # If query doesn't look like JQL, create a text search with proper escaping
             if not any(keyword in query.lower() for keyword in ['project', 'status', 'assignee', 'reporter']):
-                # Text search in summary and description
-                jql_query = f'text ~ "{query}" OR summary ~ "{query}" OR description ~ "{query}"'
+                # Text search in summary and description with proper JQL escaping
+                escaped_query = self._escape_jql_string(query)
+                jql_query = f'text ~ {escaped_query} OR summary ~ {escaped_query} OR description ~ {escaped_query}'
             else:
                 jql_query = query
             
@@ -73,11 +75,11 @@ class JiraTool:
         
         all_results = []
         
-        # Search using different strategies
+        # Search using different strategies with proper JQL escaping
         search_strategies = [
-            f'text ~ "{text[:100]}"',  # Direct text search (truncated)
-            f'summary ~ "{keywords[:50]}"',  # Summary search with keywords
-            f'description ~ "{keywords[:50]}"'  # Description search with keywords
+            f'text ~ {self._escape_jql_string(text[:100])}',  # Direct text search (truncated)
+            f'summary ~ {self._escape_jql_string(keywords[:50])}',  # Summary search with keywords
+            f'description ~ {self._escape_jql_string(keywords[:50])}'  # Description search with keywords
         ]
         
         for strategy in search_strategies:
@@ -163,6 +165,41 @@ class JiraTool:
         keywords = [word for word in words if word not in stop_words and len(word) > 2]
         
         return ' '.join(keywords[:10])  # Return top 10 keywords
+    
+    def _escape_jql_string(self, text: str) -> str:
+        """Escape special characters and reserved words in JQL strings"""
+        if not text:
+            return '""'
+        
+        # JQL reserved words that need to be handled carefully
+        jql_reserved_words = {
+            'and', 'or', 'not', 'empty', 'null', 'order', 'by', 'asc', 'desc',
+            'in', 'is', 'was', 'changed', 'after', 'before', 'during', 'on',
+            'from', 'to', 'by', 'with', 'without', 'contains', 'does', 'not'
+        }
+        
+        # Clean the text and remove problematic characters
+        # Replace quotes and backslashes
+        cleaned_text = text.replace('"', '\\"').replace('\\', '\\\\')
+        
+        # Split into words and handle reserved words
+        words = cleaned_text.split()
+        processed_words = []
+        
+        for word in words:
+            # Remove special characters that cause JQL issues
+            clean_word = re.sub(r'[^\w\s\-\.]', ' ', word.lower())
+            if clean_word.strip() and clean_word.strip() not in jql_reserved_words:
+                processed_words.append(clean_word.strip())
+        
+        # Join words and wrap in quotes
+        if processed_words:
+            final_text = ' '.join(processed_words)
+            return f'"{final_text}"'
+        else:
+            # Fallback: use original text but escape quotes
+            escaped_text = text.replace('"', '\\"')
+            return f'"{escaped_text}"'
     
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """Simple similarity calculation based on common words"""
