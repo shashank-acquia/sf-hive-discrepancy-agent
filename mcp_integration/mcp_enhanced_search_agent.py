@@ -110,6 +110,42 @@ class MCPEnhancedSearchAgent:
             args=["-y", "@modelcontextprotocol/server-memory"],
             env={}
         )
+
+            # Google Docs MCP Server (for document search with recursive folder support)
+        if os.getenv('MCP_GOOGLE_DOC_ENABLED', 'false').lower() == 'true':
+            # Support both OAuth and Service Account authentication
+            google_env = {}
+            
+            # OAuth credentials (preferred for user access)
+            if os.getenv('GOOGLE_CLIENT_ID') and os.getenv('GOOGLE_CLIENT_SECRET'):
+                google_env.update({
+                    "GOOGLE_CLIENT_ID": os.getenv('GOOGLE_CLIENT_ID', ''),
+                    "GOOGLE_CLIENT_SECRET": os.getenv('GOOGLE_CLIENT_SECRET', ''),
+                    "GOOGLE_REFRESH_TOKEN": os.getenv('GOOGLE_REFRESH_TOKEN', ''),
+                    "GOOGLE_USER_EMAIL": os.getenv('GOOGLE_USER_EMAIL', '')
+                })
+            
+            # Service Account credentials (fallback)
+            if os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY') or os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+                google_env.update({
+                    "GOOGLE_SERVICE_ACCOUNT_KEY": os.getenv('GOOGLE_SERVICE_ACCOUNT_KEY', ''),
+                    "GOOGLE_APPLICATION_CREDENTIALS": os.getenv('GOOGLE_APPLICATION_CREDENTIALS', '')
+                })
+            
+            # Folder and search configuration
+            google_env.update({
+                "GOOGLE_DOCS_FOLDER_ID": os.getenv('GOOGLE_DOCS_FOLDER_ID', ''),
+                "GOOGLE_DOCS_FOLDER_NAME": os.getenv('GOOGLE_DOCS_FOLDER_NAME', ''),
+                "GOOGLE_DOCS_RECURSIVE_SEARCH": os.getenv('GOOGLE_DOCS_RECURSIVE_SEARCH', 'true'),
+                "GOOGLE_DOCS_MAX_RESULTS": os.getenv('GOOGLE_DOCS_MAX_RESULTS', '50')
+            })
+            
+            self.mcp_servers['google_docs'] = MCPServerConfig(
+                name="google_docs",
+                command="npx",
+                args=["-y", "mcp-google-drive"],
+                env=google_env
+            )
     
     async def enhanced_search(self, query: str, platforms: Optional[List[str]] = None, 
                             context: Optional[Dict] = None) -> Dict[str, Any]:

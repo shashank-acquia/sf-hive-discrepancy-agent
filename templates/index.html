@@ -525,6 +525,15 @@ box-sizing: border-box;
             </h3>
             <div id="confluence-content"></div>
           </div>
+
+          <!-- Google Docs Results -->
+          <div id="google-docs-results" class="platform-section">
+            <h3 style="color: #2c3e50; margin-bottom: 1rem; display: flex; align-items: center;">
+              <span style="margin-right: 0.5rem;">📝</span>
+              Google Docs
+            </h3>
+            <div id="google-docs-content"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1040,6 +1049,31 @@ box-sizing: border-box;
         confluenceContent.innerHTML = '<p style="color: #666; font-style: italic;">No Confluence pages found</p>';
       }
 
+      // Display Google Docs results
+      const googleDocsContent = document.getElementById('google-docs-content');
+      const googleDocsResults = data.search_results?.google_docs || [];
+      googleDocsContent.innerHTML = '';
+      if (googleDocsResults.length > 0) {
+        googleDocsResults.forEach(doc => {
+          const docCard = document.createElement('div');
+          docCard.className = 'card';
+          docCard.innerHTML = `
+            <div style="border-left: 4px solid #4285F4; padding-left: 1rem;">
+              <strong>Document:</strong> <a href="${doc.url || '#'}" target="_blank" style="color: #4285F4;">${doc.title || 'Untitled Document'}</a><br>
+              <strong>Type:</strong> ${doc.type || 'Document'}<br>
+              <strong>Last Modified:</strong> ${doc.lastModified ? new Date(doc.lastModified).toLocaleDateString() : 'Unknown'}<br>
+              ${doc.owner ? `<strong>Owner:</strong> ${doc.owner}<br>` : ''}
+              ${doc.folder ? `<strong>Folder:</strong> ${doc.folder}<br>` : ''}
+              ${doc.excerpt ? `<strong>Content Preview:</strong><div style="margin-top: 0.5rem; padding: 0.5rem; background: #f8f9fa; border-radius: 4px; max-height: 100px; overflow-y: auto;">${doc.excerpt}</div>` : ''}
+              ${doc.metadata?.relevance_score ? `<div style="margin-top: 0.5rem;"><span style="background: #e3f2fd; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.9rem;">Relevance: ${(doc.metadata.relevance_score * 100).toFixed(0)}%</span></div>` : ''}
+            </div>
+          `;
+          googleDocsContent.appendChild(docCard);
+        });
+      } else {
+        googleDocsContent.innerHTML = '<p style="color: #666; font-style: italic;">No Google Docs found</p>';
+      }
+
       // Show results
       searchResults.style.display = 'block';
     }
@@ -1191,11 +1225,11 @@ box-sizing: border-box;
                 <div style="font-size: 0.9rem; color: #666;">Total Pages</div>
               </div>
               <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; text-align: center;">
-                <div style="font-size: 1.5rem; font-weight: bold; color: #28a745;">0</div>
+                <div style="font-size: 1.5rem; font-weight: bold; color: #28a745;">${confluence.metrics?.spaces_covered || 0}</div>
                 <div style="font-size: 0.9rem; color: #666;">Spaces Covered</div>
               </div>
               <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; text-align: center;">
-                <div style="font-size: 1.5rem; font-weight: bold; color: #17a2b8;">N/A</div>
+                <div style="font-size: 1.5rem; font-weight: bold; color: #17a2b8;">${confluence.metrics?.coverage_score ? (confluence.metrics.coverage_score * 100).toFixed(0) + '%' : 'N/A'}</div>
                 <div style="font-size: 0.9rem; color: #666;">Coverage Score</div>
               </div>
             </div>
@@ -1217,6 +1251,58 @@ box-sizing: border-box;
             <div style="background: #e8f4f8; padding: 1rem; border-radius: 6px; border-left: 3px solid #172B4D;">
               <strong style="color: #172B4D;">Summary:</strong>
               <p style="margin: 0.5rem 0 0 0; color: #333; line-height: 1.5;">${confluence.summary}</p>
+            </div>
+          `;
+        }
+        
+        insightsHTML += `</div>`;
+      }
+
+      // Google Docs Insights
+      if (platformInsights.google_docs) {
+        const googleDocs = platformInsights.google_docs;
+        insightsHTML += `
+          <div style="background: white; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; border-left: 4px solid #4285F4;">
+            <h4 style="color: #4285F4; margin: 0 0 1rem 0; display: flex; align-items: center;">
+              <span style="margin-right: 0.5rem;">📝</span>
+              Google Docs Analysis
+            </h4>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1rem;">
+              <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; text-align: center;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #4285F4;">${googleDocs.count || 0}</div>
+                <div style="font-size: 0.9rem; color: #666;">Total Documents</div>
+              </div>
+              <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; text-align: center;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #28a745;">${googleDocs.metrics?.folders_covered || 0}</div>
+                <div style="font-size: 0.9rem; color: #666;">Folders Searched</div>
+              </div>
+              <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; text-align: center;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #17a2b8;">${googleDocs.metrics?.document_coverage_score ? (googleDocs.metrics.document_coverage_score * 100).toFixed(0) + '%' : 'N/A'}</div>
+                <div style="font-size: 0.9rem; color: #666;">Coverage Score</div>
+              </div>
+              <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; text-align: center;">
+                <div style="font-size: 1.5rem; font-weight: bold; color: #ffc107;">${googleDocs.metrics?.shared_documents || 0}</div>
+                <div style="font-size: 0.9rem; color: #666;">Shared Docs</div>
+              </div>
+            </div>
+        `;
+        
+        if (googleDocs.key_findings && googleDocs.key_findings.length > 0) {
+          insightsHTML += `
+            <div style="margin-bottom: 1rem;">
+              <strong style="color: #2c3e50;">Key Findings:</strong>
+              <ul style="margin: 0.5rem 0; padding-left: 1.5rem;">
+                ${googleDocs.key_findings.map(finding => `<li style="margin: 0.3rem 0; color: #555;">${finding}</li>`).join('')}
+              </ul>
+            </div>
+          `;
+        }
+        
+        if (googleDocs.summary) {
+          insightsHTML += `
+            <div style="background: #e3f2fd; padding: 1rem; border-radius: 6px; border-left: 3px solid #4285F4;">
+              <strong style="color: #4285F4;">Summary:</strong>
+              <p style="margin: 0.5rem 0 0 0; color: #333; line-height: 1.5;">${googleDocs.summary}</p>
             </div>
           `;
         }

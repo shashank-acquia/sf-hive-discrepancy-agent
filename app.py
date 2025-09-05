@@ -180,7 +180,7 @@ def perform_search_mcp_fallback(query, channel=None):
                 # Add timeout to prevent hanging (30 seconds)
                 mcp_results = loop.run_until_complete(
                     asyncio.wait_for(
-                        mcp_agent.enhanced_search(query, ['jira', 'slack', 'confluence']),
+                        mcp_agent.enhanced_search(query, ['jira', 'slack', 'confluence', 'google_docs']),
                         timeout=30.0
                     )
                 )
@@ -206,6 +206,7 @@ def perform_search_mcp_fallback(query, channel=None):
                 slack_results = [r for r in results if r.get('platform', '').lower() == 'slack']
                 jira_results = [r for r in results if r.get('platform', '').lower() == 'jira']
                 confluence_results = [r for r in results if r.get('platform', '').lower() == 'confluence']
+                google_docs_results = [r for r in results if r.get('platform', '').lower() == 'google_docs']
                 
                 slack_header = f"💬 SLACK MCP SERVER RESPONSE ({len(slack_results)} results):"
                 print(slack_header)
@@ -230,6 +231,14 @@ def perform_search_mcp_fallback(query, channel=None):
                     confluence_result_msg = f"  Confluence Result {i}: {json.dumps(result, indent=4, default=str)}"
                     print(confluence_result_msg)
                     logger.info(confluence_result_msg)
+                
+                google_docs_header = f"📄 GOOGLE DOCS MCP SERVER RESPONSE ({len(google_docs_results)} results):"
+                print(google_docs_header)
+                logger.info(google_docs_header)
+                for i, result in enumerate(google_docs_results, 1):
+                    google_docs_result_msg = f"  Google Docs Result {i}: {json.dumps(result, indent=4, default=str)}"
+                    print(google_docs_result_msg)
+                    logger.info(google_docs_result_msg)
                 
                 # Log platform insights
                 platform_insights = mcp_results.get('platform_insights', {})
@@ -645,15 +654,50 @@ def slack_search():
                             'type': metadata.get('type', 'page'),
                             'author': metadata.get('author', 'Unknown')
                         })
+                    elif platform == 'google_docs':
+                        search_results['google_docs'] = search_results.get('google_docs', [])
+                        search_results['google_docs'].append({
+                            'title': item.get('title', 'Untitled Document'),
+                            'type': metadata.get('type', 'Document'),
+                            'lastModified': metadata.get('last_modified', metadata.get('updated')),
+                            'owner': metadata.get('owner', metadata.get('author')),
+                            'folder': metadata.get('folder', metadata.get('parent_folder')),
+                            'excerpt': item.get('content', item.get('excerpt')),
+                            'url': item.get('url'),
+                            'metadata': {
+                                'relevance_score': metadata.get('relevance_score', 0)
+                            }
+                        })
             
-            # Get platform_insights from the correct location in search_results
-            platform_insights = result.get('search_results', {}).get('platform_insights')
+            # Get platform_insights from the correct location - try multiple sources
+            platform_insights = result.get('platform_insights')
             if platform_insights is None:
+                platform_insights = result.get('search_results', {}).get('platform_insights')
+            if platform_insights is None:
+                # Create default insights structure including Google Docs
                 platform_insights = {
                     'jira': {'insights': ['No Jira data available'], 'count': 0, 'summary': 'No results'},
                     'slack': {'insights': ['No Slack data available'], 'count': 0, 'summary': 'No results'},
-                    'confluence': {'insights': ['No Confluence data available'], 'count': 0, 'summary': 'No results'}
+                    'confluence': {'insights': ['No Confluence data available'], 'count': 0, 'summary': 'No results'},
+                    'google_docs': {'insights': ['No Google Docs data available'], 'count': 0, 'summary': 'No results'}
                 }
+            
+            # Ensure Google Docs insights are included if we have Google Docs results
+            google_docs_results = search_results.get('google_docs', [])
+            if google_docs_results and 'google_docs' not in platform_insights:
+                # Generate Google Docs insights if missing
+                platform_insights['google_docs'] = {
+                    'insights': [
+                        f"Found {len(google_docs_results)} Google Docs documents",
+                        f"• Document types: Various formats available",
+                        f"• {len([d for d in google_docs_results if d.get('metadata', {}).get('relevance_score', 0) > 0.5])} highly relevant documents"
+                    ],
+                    'count': len(google_docs_results),
+                    'summary': f"Found {len(google_docs_results)} Google Docs with relevant content"
+                }
+            elif google_docs_results and 'google_docs' in platform_insights:
+                # Update count if insights exist but count is wrong
+                platform_insights['google_docs']['count'] = len(google_docs_results)
             
             return jsonify({
                 'success': True,

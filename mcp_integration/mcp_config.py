@@ -97,6 +97,29 @@ class MCPConfigManager:
             env={},
             enabled=True  # Always enabled as it doesn't require external credentials
         )
+        
+        # Google Docs MCP Server
+        google_docs_env = {}
+        if os.getenv('MCP_GOOGLE_DOC_ENABLED', 'false').lower() == 'true':
+            google_docs_env.update({
+                'GOOGLE_CLIENT_ID': os.getenv('GOOGLE_CLIENT_ID', ''),
+                'GOOGLE_CLIENT_SECRET': os.getenv('GOOGLE_CLIENT_SECRET', ''),
+                'GOOGLE_REFRESH_TOKEN': os.getenv('GOOGLE_REFRESH_TOKEN', ''),
+                'GOOGLE_DOCS_FOLDER_ID': os.getenv('GOOGLE_DOCS_FOLDER_ID', ''),
+                'GOOGLE_DOCS_FOLDER_NAME': os.getenv('GOOGLE_DOCS_FOLDER_NAME', ''),
+                'GOOGLE_DOCS_RECURSIVE_SEARCH': os.getenv('GOOGLE_DOCS_RECURSIVE_SEARCH', 'true'),
+                'GOOGLE_DOCS_MAX_RESULTS': os.getenv('GOOGLE_DOCS_MAX_RESULTS', '50')
+            })
+        
+        self.servers['google_docs'] = MCPServerConfig(
+            name='google_docs',
+            command='npx',
+            args=['-y', 'mcp-google-drive'],
+            env=google_docs_env,
+            enabled=bool(os.getenv('MCP_GOOGLE_DOC_ENABLED', 'false').lower() == 'true' and 
+                        os.getenv('GOOGLE_CLIENT_ID') and 
+                        os.getenv('GOOGLE_CLIENT_SECRET'))
+        )
     
     def get_enabled_servers(self) -> Dict[str, MCPServerConfig]:
         """Get all enabled MCP server configurations"""
@@ -149,6 +172,19 @@ class MCPConfigManager:
             elif name == 'github':
                 if not os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN'):
                     status[name] = "Missing GITHUB_PERSONAL_ACCESS_TOKEN"
+                    config.enabled = False
+                else:
+                    status[name] = "Ready"
+            
+            elif name == 'google_docs':
+                if not os.getenv('MCP_GOOGLE_DOC_ENABLED', 'false').lower() == 'true':
+                    status[name] = "Disabled - MCP_GOOGLE_DOC_ENABLED not set to true"
+                    config.enabled = False
+                elif not (os.getenv('GOOGLE_CLIENT_ID') and os.getenv('GOOGLE_CLIENT_SECRET')):
+                    status[name] = "Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET"
+                    config.enabled = False
+                elif not (os.getenv('GOOGLE_DOCS_FOLDER_ID', '').strip() or os.getenv('GOOGLE_DOCS_FOLDER_NAME', '').strip()):
+                    status[name] = "Missing GOOGLE_DOCS_FOLDER_ID or GOOGLE_DOCS_FOLDER_NAME"
                     config.enabled = False
                 else:
                     status[name] = "Ready"
