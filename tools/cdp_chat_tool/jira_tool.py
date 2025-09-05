@@ -13,6 +13,7 @@ class JiraTool:
         self.server = os.getenv('JIRA_SERVER')
         self.username = os.getenv('JIRA_USERNAME')
         self.api_token = os.getenv('JIRA_API_TOKEN')
+        self.project_keys = self._get_project_keys()
         
         if self.server and self.username and self.api_token:
             try:
@@ -27,20 +28,57 @@ class JiraTool:
             logger.warning("JIRA credentials not found in environment variables")
             self.jira = None
     
+    def _get_project_keys(self) -> List[str]:
+        """Get project keys from environment variable"""
+        project_key_env = os.getenv('JIRA_PROJECT_KEY', '')
+        if project_key_env:
+            # Split by comma and strip whitespace
+            keys = [key.strip() for key in project_key_env.split(',') if key.strip()]
+            logger.info(f"JIRA search restricted to projects: {keys}")
+            return keys
+        else:
+            logger.warning("JIRA_PROJECT_KEY not found in environment variables")
+            return []
+    
+    def _build_project_filter(self) -> str:
+        """Build JQL project filter clause"""
+        if not self.project_keys:
+            return ""
+        
+        if len(self.project_keys) == 1:
+            return f'project = "{self.project_keys[0]}"'
+        else:
+            project_list = ', '.join([f'"{key}"' for key in self.project_keys])
+            return f'project in ({project_list})'
+    
     def search_issues(self, query: str, max_results: int = 20) -> List[Dict]:
         """Search for JIRA issues using JQL or text search"""
         if not self.jira:
             return []
         
         try:
+            # Build project filter
+            project_filter = self._build_project_filter()
+            
             # If query doesn't look like JQL, create a text search with proper escaping
             if not any(keyword in query.lower() for keyword in ['project', 'status', 'assignee', 'reporter']):
                 # Text search in summary and description with proper JQL escaping
                 escaped_query = self._escape_jql_string(query)
-                jql_query = f'text ~ {escaped_query} OR summary ~ {escaped_query} OR description ~ {escaped_query}'
+                search_clause = f'text ~ {escaped_query} OR summary ~ {escaped_query} OR description ~ {escaped_query}'
+                
+                # Combine with project filter
+                if project_filter:
+                    jql_query = f'({project_filter}) AND ({search_clause})'
+                else:
+                    jql_query = search_clause
             else:
-                jql_query = query
+                # User provided JQL query - add project filter if not already present
+                if project_filter and 'project' not in query.lower():
+                    jql_query = f'({project_filter}) AND ({query})'
+                else:
+                    jql_query = query
             
+            logger.info(f"Executing JQL query: {jql_query}")
             issues = self.jira.search_issues(jql_query, maxResults=max_results, expand='changelog')
             
             results = []
@@ -70,6 +108,9 @@ class JiraTool:
         if not self.jira:
             return []
         
+        # Build project filter
+        project_filter = self._build_project_filter()
+        
         # Extract key terms from the text for better searching
         keywords = self._extract_keywords(text)
         
@@ -84,7 +125,14 @@ class JiraTool:
         
         for strategy in search_strategies:
             try:
-                issues = self.jira.search_issues(strategy, maxResults=max_results//len(search_strategies) + 1)
+                # Add project filter to each search strategy
+                if project_filter:
+                    jql_query = f'({project_filter}) AND ({strategy})'
+                else:
+                    jql_query = strategy
+                
+                logger.info(f"Executing similarity search JQL: {jql_query}")
+                issues = self.jira.search_issues(jql_query, maxResults=max_results//len(search_strategies) + 1)
                 for issue in issues:
                     issue_data = {
                         'key': issue.key,
