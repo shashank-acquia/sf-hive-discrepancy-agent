@@ -42,6 +42,11 @@ def matrix_tables_tool(input_data: dict) -> List[dict]:
     
     list_ids = list_ids[:3]
     print(f"🧪 list_ids type: {type(list_ids)}")
+    
+    if not list_ids:
+        print("⚠️ No IDs provided in list_ids")
+        return "No discrepancies found."
+    
     print(f"🧪 First item: {list_ids[0]}")
 
     for id_val in list_ids:
