@@ -492,15 +492,16 @@ def slack_search():
         result = perform_search(query, channel)
         
         if result.get('success'):
-            # Generate solution recommendations using MCP enhanced search agent
+            # Generate solution recommendations using MCP enhanced search agent with direct API fallback
             solution_analysis = None
             try:
                 from mcp_integration.mcp_enhanced_search_agent import MCPEnhancedSearchAgent
+                from direct_api_fallback import direct_api_fallback
                 import asyncio
                 
                 mcp_agent = MCPEnhancedSearchAgent()
                 
-                # Run solution analysis with timeout
+                # Run solution analysis with reduced timeout and fallback
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
@@ -508,7 +509,7 @@ def slack_search():
                     raw_solution_analysis = loop.run_until_complete(
                         asyncio.wait_for(
                             mcp_agent.analyze_technical_issue_and_generate_solution(result.get('results', []), query),
-                            timeout=15.0
+                            timeout=5.0  # Reduced to 5s to prevent UI timeouts
                         )
                     )
                     
@@ -530,10 +531,105 @@ def slack_search():
                     source_links = solution_recommendations.get('source_links', [])
                     solution_analysis['source_links'] = source_links
                     
-                    # Create primary solution from recommendations with source link
+                    # Create primary solution from recommendations with source link and detailed solutions
                     if solution_recommendations:
                         primary_solution_source = solution_recommendations.get('primary_solution_source', '')
+                        detailed_solutions_data = raw_solution_analysis.get('detailed_solutions', [])
                         
+                        # Extract Jira comments from detailed solutions with enhanced data
+                        jira_comments = []
+                        slack_thread_solutions = []
+                        confluence_solutions = []
+                        
+                        logger.info(f"🔍 Processing {len(detailed_solutions_data)} detailed solution sources for UI display")
+                        
+                        for detailed_sol in detailed_solutions_data:
+                            source = detailed_sol.get('source', '')
+                            logger.info(f"📊 Processing {source} solution data: {list(detailed_sol.keys())}")
+                            
+                            if source == 'jira':
+                                # Extract Jira comments and solutions with enhanced metadata
+                                comments = detailed_sol.get('comments', [])
+                                solutions = detailed_sol.get('solutions', [])
+                                ticket_key = detailed_sol.get('ticket', 'Unknown')
+                                ticket_url = detailed_sol.get('url', '')
+                                
+                                logger.info(f"🎫 Processing Jira ticket {ticket_key}: {len(comments)} comments, {len(solutions)} solutions")
+                                
+                                # Add actual Jira comments with enhanced metadata
+                                for comment in comments[:10]:  # Increased to 10 comments for better coverage
+                                    jira_comment = {
+                                        'author': comment.get('author', 'Unknown'),
+                                        'content': comment.get('body', comment.get('content', 'No content')),
+                                        'created': comment.get('created', ''),
+                                        'type': 'jira_comment',
+                                        'ticket_key': ticket_key,
+                                        'ticket_url': ticket_url,
+                                        'source_platform': 'jira'
+                                    }
+                                    jira_comments.append(jira_comment)
+                                    logger.info(f"  📝 Added Jira comment from {jira_comment['author']}")
+                                
+                                # Add solution-specific comments with enhanced metadata
+                                for solution in solutions[:5]:  # Increased to 5 solutions
+                                    solution_comment = {
+                                        'author': solution.get('author', 'AI Analysis'),
+                                        'content': solution.get('content', 'No content'),
+                                        'created': solution.get('created', ''),
+                                        'keywords_matched': solution.get('keywords_matched', []),
+                                        'confidence': solution.get('confidence', 0),
+                                        'type': solution.get('type', 'jira_solution'),
+                                        'ticket_key': ticket_key,
+                                        'ticket_url': ticket_url,
+                                        'source_platform': 'jira'
+                                    }
+                                    jira_comments.append(solution_comment)
+                                    logger.info(f"  💡 Added Jira solution from {solution_comment['author']} (confidence: {solution_comment['confidence']:.2f})")
+                            
+                            elif source == 'slack':
+                                # Extract Slack thread solutions with enhanced metadata
+                                solutions = detailed_sol.get('solutions', [])
+                                channel = detailed_sol.get('channel', 'unknown')
+                                thread_url = detailed_sol.get('url', '')
+                                
+                                logger.info(f"💬 Processing Slack channel #{channel}: {len(solutions)} solutions")
+                                
+                                for solution in solutions[:5]:  # Increased to 5 solutions
+                                    slack_solution = {
+                                        'author': solution.get('author', 'Unknown'),
+                                        'content': solution.get('content', 'No content'),
+                                        'timestamp': solution.get('timestamp', ''),
+                                        'confidence': solution.get('confidence', 0),
+                                        'type': solution.get('type', 'slack_thread_solution'),
+                                        'channel': channel,
+                                        'thread_url': thread_url,
+                                        'source_platform': 'slack'
+                                    }
+                                    slack_thread_solutions.append(slack_solution)
+                                    logger.info(f"  💬 Added Slack solution from {slack_solution['author']} in #{channel}")
+                            
+                            elif source == 'confluence':
+                                # Extract Confluence solutions with enhanced metadata
+                                solutions = detailed_sol.get('solutions', [])
+                                page_title = detailed_sol.get('page_title', 'Unknown Page')
+                                page_url = detailed_sol.get('url', '')
+                                
+                                logger.info(f"📄 Processing Confluence page '{page_title}': {len(solutions)} solutions")
+                                
+                                for solution in solutions[:5]:  # Increased to 5 solutions
+                                    confluence_solution = {
+                                        'content': solution.get('content', 'No content'),
+                                        'pattern': solution.get('pattern', ''),
+                                        'confidence': solution.get('confidence', 0),
+                                        'type': solution.get('type', 'confluence_documentation_solution'),
+                                        'page_title': page_title,
+                                        'page_url': page_url,
+                                        'source_platform': 'confluence'
+                                    }
+                                    confluence_solutions.append(confluence_solution)
+                                    logger.info(f"  📄 Added Confluence solution from '{page_title}'")
+                        
+                        # Enhanced primary solution with comprehensive data
                         primary_solution = {
                             'error_pattern': f"Technical Issue Analysis for: {query}",
                             'technical_context': f"Found {len(error_patterns)} error patterns across platforms",
@@ -544,8 +640,25 @@ def slack_search():
                             'related_tickets': [ep.get('title', 'Unknown') for ep in error_patterns if ep.get('platform') == 'jira'],
                             'confidence_score': 0.8,  # Default confidence
                             'source_url': primary_solution_source,  # Add source URL to primary solution
-                            'source_links': [link for link in source_links if link.get('type') == 'primary_solution']  # Primary solution links
+                            'source_links': [link for link in source_links if link.get('type') == 'primary_solution'],  # Primary solution links
+                            # Enhanced detailed solutions for UI display with comprehensive data
+                            'jira_comments': jira_comments,
+                            'slack_thread_solutions': slack_thread_solutions,
+                            'confluence_solutions': confluence_solutions,
+                            # Additional metadata for debugging and UI enhancement
+                            'solution_metadata': {
+                                'total_jira_comments': len(jira_comments),
+                                'total_slack_solutions': len(slack_thread_solutions),
+                                'total_confluence_solutions': len(confluence_solutions),
+                                'detailed_sources_processed': len(detailed_solutions_data),
+                                'query_analyzed': query
+                            }
                         }
+                        
+                        logger.info(f"✅ Primary solution created with:")
+                        logger.info(f"  🎫 Jira comments: {len(jira_comments)}")
+                        logger.info(f"  💬 Slack solutions: {len(slack_thread_solutions)}")
+                        logger.info(f"  📄 Confluence solutions: {len(confluence_solutions)}")
                         
                         solution_analysis['solutions'].append(primary_solution)
                         
@@ -567,7 +680,7 @@ def slack_search():
                             }
                             solution_analysis['solutions'].append(alt_solution)
                     
-                    # If no structured solutions, create a basic one from error patterns
+                    # If no structured solutions, create a basic one from error patterns with empty arrays
                     if not solution_analysis['solutions'] and error_patterns:
                         basic_solution = {
                             'error_pattern': f"Error Pattern Analysis for: {query}",
@@ -578,34 +691,80 @@ def slack_search():
                                 "Check related tickets for solutions",
                                 "Consult team members who worked on similar issues"
                             ],
-                            'confidence_score': 0.5
+                            'confidence_score': 0.5,
+                            # Ensure these arrays exist even for basic solutions
+                            'jira_comments': [],
+                            'slack_thread_solutions': [],
+                            'confluence_solutions': [],
+                            'solution_metadata': {
+                                'total_jira_comments': 0,
+                                'total_slack_solutions': 0,
+                                'total_confluence_solutions': 0,
+                                'detailed_sources_processed': 0,
+                                'query_analyzed': query
+                            }
                         }
                         solution_analysis['solutions'].append(basic_solution)
+                        logger.info("📝 Created basic solution with empty solution arrays")
                     
                     logger.info(f"✅ Solution analysis completed: {len(solution_analysis.get('solutions', []))} solutions generated")
                 finally:
                     loop.close()
                     
             except asyncio.TimeoutError:
-                logger.warning(f"⚠️ Solution analysis timed out for query: '{query}'")
-                solution_analysis = {
-                    'solutions': [{
-                        'error_pattern': 'Analysis Timeout',
-                        'solution': 'Solution analysis timed out. Please try a more specific query or try again later.',
-                        'confidence_score': 0.3
-                    }],
-                    'error': 'Solution analysis timed out'
-                }
+                logger.warning(f"⚠️ MCP solution analysis timed out for query: '{query}', using direct API fallback")
+                try:
+                    # Use direct API fallback when MCP times out
+                    solution_analysis = direct_api_fallback.generate_solution_analysis_fallback(result.get('results', []), query)
+                    logger.info(f"✅ Direct API fallback completed successfully")
+                except Exception as fallback_error:
+                    logger.error(f"❌ Direct API fallback also failed: {fallback_error}")
+                    solution_analysis = {
+                        'solutions': [{
+                            'error_pattern': 'Analysis Timeout - Fallback Failed',
+                            'solution': 'Both MCP and direct API analysis failed. Basic search results are available above.',
+                            'confidence_score': 0.3,
+                            'jira_comments': [],
+                            'slack_thread_solutions': [],
+                            'confluence_solutions': [],
+                            'solution_metadata': {
+                                'total_jira_comments': 0,
+                                'total_slack_solutions': 0,
+                                'total_confluence_solutions': 0,
+                                'detailed_sources_processed': 0,
+                                'query_analyzed': query,
+                                'error': 'Timeout and fallback failed'
+                            }
+                        }],
+                        'error': 'Solution analysis timed out and fallback failed'
+                    }
             except Exception as e:
-                logger.error(f"❌ Solution analysis failed: {e}")
-                solution_analysis = {
-                    'solutions': [{
-                        'error_pattern': 'Analysis Error',
-                        'solution': f'Solution analysis encountered an error: {str(e)}. Please try again or contact support.',
-                        'confidence_score': 0.2
-                    }],
-                    'error': f'Solution analysis failed: {str(e)}'
-                }
+                logger.error(f"❌ MCP solution analysis failed: {e}, using direct API fallback")
+                try:
+                    # Use direct API fallback when MCP fails
+                    solution_analysis = direct_api_fallback.generate_solution_analysis_fallback(result.get('results', []), query)
+                    logger.info(f"✅ Direct API fallback completed successfully after MCP failure")
+                except Exception as fallback_error:
+                    logger.error(f"❌ Direct API fallback also failed: {fallback_error}")
+                    solution_analysis = {
+                        'solutions': [{
+                            'error_pattern': 'Analysis Error - Fallback Failed',
+                            'solution': f'Both MCP analysis and direct API fallback failed. Basic search results are available above. Error: {str(e)}',
+                            'confidence_score': 0.2,
+                            'jira_comments': [],
+                            'slack_thread_solutions': [],
+                            'confluence_solutions': [],
+                            'solution_metadata': {
+                                'total_jira_comments': 0,
+                                'total_slack_solutions': 0,
+                                'total_confluence_solutions': 0,
+                                'detailed_sources_processed': 0,
+                                'query_analyzed': query,
+                                'error': f'MCP and fallback failed: {str(e)}'
+                            }
+                        }],
+                        'error': f'Solution analysis failed: {str(e)}'
+                    }
             
             # Structure the response to match what the UI expects
             search_results = {
@@ -669,6 +828,50 @@ def slack_search():
                             }
                         })
             
+            # CRITICAL FIX: Add Jira tickets extracted from Slack threads to jira_issues array
+            # This ensures cross-platform Jira tickets appear in Platform Intelligence Insights and Jira Issues sections
+            if solution_analysis and solution_analysis.get('solutions'):
+                logger.info("🔍 Processing solution analysis for cross-platform Jira tickets...")
+                
+                for solution in solution_analysis.get('solutions', []):
+                    jira_comments = solution.get('jira_comments', [])
+                    
+                    # Extract unique Jira tickets from solution analysis
+                    processed_tickets = set()
+                    for comment in jira_comments:
+                        ticket_key = comment.get('ticket_key')
+                        ticket_url = comment.get('ticket_url')
+                        found_via = comment.get('found_via', '')
+                        
+                        if ticket_key and ticket_key not in processed_tickets:
+                            # Check if this ticket is already in the jira_issues array
+                            existing_ticket = next((t for t in search_results['jira_issues'] if t.get('key') == ticket_key), None)
+                            
+                            if not existing_ticket:
+                                # Add the cross-platform Jira ticket to the jira_issues array
+                                cross_platform_ticket = {
+                                    'key': ticket_key,
+                                    'summary': f"Cross-platform ticket from Slack analysis: {comment.get('content', 'No summary')[:100]}...",
+                                    'status': 'Referenced in Slack',
+                                    'priority': 'Unknown',
+                                    'assignee': 'Unknown',
+                                    'description': comment.get('content', 'Jira ticket extracted from Slack thread analysis'),
+                                    'url': ticket_url or f"https://acquia.atlassian.net/browse/{ticket_key}",
+                                    'project': 'Cross-Platform',
+                                    'issue_type': 'Referenced',
+                                    'found_via': found_via,
+                                    'cross_platform_source': 'slack_thread_analysis'
+                                }
+                                
+                                search_results['jira_issues'].append(cross_platform_ticket)
+                                processed_tickets.add(ticket_key)
+                                
+                                logger.info(f"✅ Added cross-platform Jira ticket {ticket_key} to jira_issues array (found via: {found_via})")
+                            else:
+                                logger.info(f"ℹ️ Jira ticket {ticket_key} already exists in jira_issues array")
+                
+                logger.info(f"🎫 Final jira_issues count: {len(search_results['jira_issues'])} (including cross-platform tickets)")
+            
             # Get platform_insights from the correct location - try multiple sources
             platform_insights = result.get('platform_insights')
             if platform_insights is None:
@@ -708,7 +911,6 @@ def slack_search():
                 'additional_insights': result.get('additional_insights', []),
                 'cross_platform_results': result.get('cross_platform_results', []),
                 'semantic_score': result.get('semantic_score', 0),
-                'platform_insights': platform_insights,
                 'processing_time': result.get('metadata', {}).get('processing_time', 'N/A'),
                 'solution_analysis': solution_analysis or {
                     'solutions': [],

@@ -83,20 +83,40 @@ class JiraTool:
             
             results = []
             for issue in issues:
-                results.append({
-                    'key': issue.key,
-                    'summary': issue.fields.summary,
-                    'description': getattr(issue.fields, 'description', '') or '',
-                    'status': issue.fields.status.name,
-                    'priority': getattr(issue.fields.priority, 'name', 'None') if issue.fields.priority else 'None',
-                    'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
-                    'reporter': issue.fields.reporter.displayName if issue.fields.reporter else 'Unknown',
-                    'created': str(issue.fields.created),
-                    'updated': str(issue.fields.updated),
-                    'url': f"{self.server}/browse/{issue.key}",
-                    'project': issue.fields.project.name,
-                    'issue_type': issue.fields.issuetype.name
-                })
+                try:
+                    # Safe access to all issue fields with proper error handling
+                    issue_data = {
+                        'key': issue.key,
+                        'summary': getattr(issue.fields, 'summary', 'No summary'),
+                        'description': getattr(issue.fields, 'description', '') or '',
+                        'status': getattr(issue.fields.status, 'name', 'Unknown') if hasattr(issue.fields, 'status') and issue.fields.status else 'Unknown',
+                        'priority': self._safe_get_priority(issue),
+                        'assignee': getattr(issue.fields.assignee, 'displayName', 'Unassigned') if hasattr(issue.fields, 'assignee') and issue.fields.assignee else 'Unassigned',
+                        'reporter': getattr(issue.fields.reporter, 'displayName', 'Unknown') if hasattr(issue.fields, 'reporter') and issue.fields.reporter else 'Unknown',
+                        'created': str(getattr(issue.fields, 'created', 'Unknown')),
+                        'updated': str(getattr(issue.fields, 'updated', 'Unknown')),
+                        'url': f"{self.server}/browse/{issue.key}",
+                        'project': getattr(issue.fields.project, 'name', 'Unknown') if hasattr(issue.fields, 'project') and issue.fields.project else 'Unknown',
+                        'issue_type': getattr(issue.fields.issuetype, 'name', 'Unknown') if hasattr(issue.fields, 'issuetype') and issue.fields.issuetype else 'Unknown'
+                    }
+                    results.append(issue_data)
+                except Exception as field_error:
+                    logger.warning(f"Error processing issue {issue.key}: {field_error}")
+                    # Add minimal issue data even if some fields fail
+                    results.append({
+                        'key': issue.key,
+                        'summary': 'Error loading summary',
+                        'description': '',
+                        'status': 'Unknown',
+                        'priority': 'Unknown',
+                        'assignee': 'Unknown',
+                        'reporter': 'Unknown',
+                        'created': 'Unknown',
+                        'updated': 'Unknown',
+                        'url': f"{self.server}/browse/{issue.key}",
+                        'project': 'Unknown',
+                        'issue_type': 'Unknown'
+                    })
             
             return results
         except Exception as e:
@@ -134,16 +154,31 @@ class JiraTool:
                 logger.info(f"Executing similarity search JQL: {jql_query}")
                 issues = self.jira.search_issues(jql_query, maxResults=max_results//len(search_strategies) + 1)
                 for issue in issues:
-                    issue_data = {
-                        'key': issue.key,
-                        'summary': issue.fields.summary,
-                        'description': getattr(issue.fields, 'description', '') or '',
-                        'status': issue.fields.status.name,
-                        'priority': getattr(issue.fields.priority, 'name', 'None') if issue.fields.priority else 'None',
-                        'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
-                        'url': f"{self.server}/browse/{issue.key}",
-                        'similarity_score': self._calculate_similarity(text, issue.fields.summary + ' ' + (getattr(issue.fields, 'description', '') or ''))
-                    }
+                    try:
+                        # Safe access to all issue fields with proper error handling
+                        issue_data = {
+                            'key': issue.key,
+                            'summary': getattr(issue.fields, 'summary', 'No summary'),
+                            'description': getattr(issue.fields, 'description', '') or '',
+                            'status': getattr(issue.fields.status, 'name', 'Unknown') if hasattr(issue.fields, 'status') and issue.fields.status else 'Unknown',
+                            'priority': self._safe_get_priority(issue),
+                            'assignee': getattr(issue.fields.assignee, 'displayName', 'Unassigned') if hasattr(issue.fields, 'assignee') and issue.fields.assignee else 'Unassigned',
+                            'url': f"{self.server}/browse/{issue.key}",
+                            'similarity_score': self._calculate_similarity(text, getattr(issue.fields, 'summary', '') + ' ' + (getattr(issue.fields, 'description', '') or ''))
+                        }
+                    except Exception as field_error:
+                        logger.warning(f"Error processing similarity issue {issue.key}: {field_error}")
+                        # Add minimal issue data even if some fields fail
+                        issue_data = {
+                            'key': issue.key,
+                            'summary': 'Error loading summary',
+                            'description': '',
+                            'status': 'Unknown',
+                            'priority': 'Unknown',
+                            'assignee': 'Unknown',
+                            'url': f"{self.server}/browse/{issue.key}",
+                            'similarity_score': 0.0
+                        }
                     
                     # Avoid duplicates
                     if not any(result['key'] == issue_data['key'] for result in all_results):
@@ -165,38 +200,64 @@ class JiraTool:
         try:
             issue = self.jira.issue(issue_key, expand='changelog,comments')
             
-            # Get comments
+            # Get comments with safe field access
             comments = []
-            for comment in issue.fields.comment.comments:
-                comments.append({
-                    'author': comment.author.displayName,
-                    'body': comment.body,
-                    'created': str(comment.created)
-                })
+            try:
+                if hasattr(issue.fields, 'comment') and issue.fields.comment and hasattr(issue.fields.comment, 'comments'):
+                    for comment in issue.fields.comment.comments:
+                        try:
+                            comments.append({
+                                'author': getattr(comment.author, 'displayName', 'Unknown') if hasattr(comment, 'author') and comment.author else 'Unknown',
+                                'body': getattr(comment, 'body', ''),
+                                'created': str(getattr(comment, 'created', 'Unknown'))
+                            })
+                        except Exception as comment_error:
+                            logger.warning(f"Error processing comment in issue {issue_key}: {comment_error}")
+                            comments.append({
+                                'author': 'Unknown',
+                                'body': 'Error loading comment',
+                                'created': 'Unknown'
+                            })
+            except Exception as comments_error:
+                logger.warning(f"Error accessing comments for issue {issue_key}: {comments_error}")
             
-            # Get attachments
+            # Get attachments with safe field access
             attachments = []
-            for attachment in issue.fields.attachment:
-                attachments.append({
-                    'filename': attachment.filename,
-                    'size': attachment.size,
-                    'created': str(attachment.created),
-                    'url': attachment.content
-                })
+            try:
+                if hasattr(issue.fields, 'attachment') and issue.fields.attachment:
+                    for attachment in issue.fields.attachment:
+                        try:
+                            attachments.append({
+                                'filename': getattr(attachment, 'filename', 'Unknown'),
+                                'size': getattr(attachment, 'size', 0),
+                                'created': str(getattr(attachment, 'created', 'Unknown')),
+                                'url': getattr(attachment, 'content', '')
+                            })
+                        except Exception as attachment_error:
+                            logger.warning(f"Error processing attachment in issue {issue_key}: {attachment_error}")
+                            attachments.append({
+                                'filename': 'Error loading attachment',
+                                'size': 0,
+                                'created': 'Unknown',
+                                'url': ''
+                            })
+            except Exception as attachments_error:
+                logger.warning(f"Error accessing attachments for issue {issue_key}: {attachments_error}")
             
+            # Safe access to all issue fields with proper error handling
             return {
                 'key': issue.key,
-                'summary': issue.fields.summary,
+                'summary': getattr(issue.fields, 'summary', 'No summary'),
                 'description': getattr(issue.fields, 'description', '') or '',
-                'status': issue.fields.status.name,
-                'priority': getattr(issue.fields.priority, 'name', 'None') if issue.fields.priority else 'None',
-                'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
-                'reporter': issue.fields.reporter.displayName if issue.fields.reporter else 'Unknown',
-                'created': str(issue.fields.created),
-                'updated': str(issue.fields.updated),
+                'status': getattr(issue.fields.status, 'name', 'Unknown') if hasattr(issue.fields, 'status') and issue.fields.status else 'Unknown',
+                'priority': self._safe_get_priority(issue),
+                'assignee': getattr(issue.fields.assignee, 'displayName', 'Unassigned') if hasattr(issue.fields, 'assignee') and issue.fields.assignee else 'Unassigned',
+                'reporter': getattr(issue.fields.reporter, 'displayName', 'Unknown') if hasattr(issue.fields, 'reporter') and issue.fields.reporter else 'Unknown',
+                'created': str(getattr(issue.fields, 'created', 'Unknown')),
+                'updated': str(getattr(issue.fields, 'updated', 'Unknown')),
                 'url': f"{self.server}/browse/{issue.key}",
-                'project': issue.fields.project.name,
-                'issue_type': issue.fields.issuetype.name,
+                'project': getattr(issue.fields.project, 'name', 'Unknown') if hasattr(issue.fields, 'project') and issue.fields.project else 'Unknown',
+                'issue_type': getattr(issue.fields.issuetype, 'name', 'Unknown') if hasattr(issue.fields, 'issuetype') and issue.fields.issuetype else 'Unknown',
                 'comments': comments,
                 'attachments': attachments
             }
@@ -249,6 +310,17 @@ class JiraTool:
             escaped_text = text.replace('"', '\\"')
             return f'"{escaped_text}"'
     
+    def _safe_get_priority(self, issue) -> str:
+        """Safely get priority from issue with proper error handling"""
+        try:
+            if hasattr(issue.fields, 'priority') and issue.fields.priority:
+                return getattr(issue.fields.priority, 'name', 'Unknown')
+            else:
+                return 'None'
+        except Exception as e:
+            logger.warning(f"Error accessing priority for issue {getattr(issue, 'key', 'unknown')}: {e}")
+            return 'Unknown'
+    
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """Simple similarity calculation based on common words"""
         words1 = set(text1.lower().split())
@@ -273,15 +345,29 @@ class JiraTool:
             
             results = []
             for issue in issues:
-                results.append({
-                    'key': issue.key,
-                    'summary': issue.fields.summary,
-                    'status': issue.fields.status.name,
-                    'priority': getattr(issue.fields.priority, 'name', 'None') if issue.fields.priority else 'None',
-                    'assignee': issue.fields.assignee.displayName if issue.fields.assignee else 'Unassigned',
-                    'updated': str(issue.fields.updated),
-                    'url': f"{self.server}/browse/{issue.key}"
-                })
+                try:
+                    # Safe access to all issue fields with proper error handling
+                    results.append({
+                        'key': issue.key,
+                        'summary': getattr(issue.fields, 'summary', 'No summary'),
+                        'status': getattr(issue.fields.status, 'name', 'Unknown') if hasattr(issue.fields, 'status') and issue.fields.status else 'Unknown',
+                        'priority': self._safe_get_priority(issue),
+                        'assignee': getattr(issue.fields.assignee, 'displayName', 'Unassigned') if hasattr(issue.fields, 'assignee') and issue.fields.assignee else 'Unassigned',
+                        'updated': str(getattr(issue.fields, 'updated', 'Unknown')),
+                        'url': f"{self.server}/browse/{issue.key}"
+                    })
+                except Exception as field_error:
+                    logger.warning(f"Error processing project issue {issue.key}: {field_error}")
+                    # Add minimal issue data even if some fields fail
+                    results.append({
+                        'key': issue.key,
+                        'summary': 'Error loading summary',
+                        'status': 'Unknown',
+                        'priority': 'Unknown',
+                        'assignee': 'Unknown',
+                        'updated': 'Unknown',
+                        'url': f"{self.server}/browse/{issue.key}"
+                    })
             
             return results
         except Exception as e:

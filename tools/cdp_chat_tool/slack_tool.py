@@ -120,7 +120,7 @@ class SlackTool:
             return {}
     
     def search_in_channels(self, query: str, channels: List[str], limit: int = 10) -> List[Dict]:
-        """Search for messages in specific channels using conversation history"""
+        """Search for messages in specific channels with enhanced thread detection"""
         all_results = []
         
         # If no user token available, use conversation history as fallback
@@ -140,14 +140,30 @@ class SlackTool:
                 
                 if response['ok'] and 'messages' in response:
                     for match in response['messages']['matches']:
-                        all_results.append({
+                        # Enhanced result processing with thread detection
+                        result = {
                             'text': match.get('text', ''),
                             'user': match.get('user', ''),
                             'channel': match.get('channel', {}).get('name', ''),
                             'ts': match.get('ts', ''),
                             'permalink': match.get('permalink', ''),
-                            'score': match.get('score', 0)
-                        })
+                            'score': match.get('score', 0),
+                            'thread_summary': '',
+                            'reply_count': 0
+                        }
+                        
+                        # Try to get thread information using search API for thread messages
+                        thread_summary = self._get_thread_summary_from_search(channel, match.get('ts', ''), query)
+                        if thread_summary:
+                            result['thread_summary'] = thread_summary
+                            # Estimate reply count from thread summary
+                            if 'replies discussing' in thread_summary:
+                                import re
+                                reply_match = re.search(r'(\d+) replies', thread_summary)
+                                if reply_match:
+                                    result['reply_count'] = int(reply_match.group(1))
+                        
+                        all_results.append(result)
                         
             except SlackApiError as e:
                 logger.error(f"Error searching in channel {channel}: {e}")
@@ -237,6 +253,154 @@ class SlackTool:
             logger.error(f"Error getting channel ID for {channel_name}: {e}")
             return None
     
+    def _get_thread_summary_from_search(self, channel: str, thread_ts: str, original_query: str) -> str:
+        """Get thread summary using search API by analyzing all search results for thread relationships"""
+        try:
+            if not thread_ts or not self.user_client:
+                return ""
+            
+            logger.info(f"Getting thread summary via search analysis for ts: {thread_ts} in channel: {channel}")
+            
+            # Instead of searching for thread specifically, search broadly in the channel
+            # and then filter for messages that are part of this thread
+            broad_query = f"in:#{channel}"
+            
+            # Add some keywords from the original query to narrow down results
+            query_words = original_query.split()[:3]  # Take first 3 words
+            if query_words:
+                broad_query += f" {' '.join(query_words)}"
+            
+            logger.info(f"Using broad search query: '{broad_query}'")
+            
+            try:
+                response = self.user_client.search_messages(
+                    query=broad_query,
+                    count=50  # Get more results to find thread messages
+                )
+                
+                if response['ok'] and 'messages' in response:
+                    all_matches = response['messages']['matches']
+                    logger.info(f"Found {len(all_matches)} total messages in broad search")
+                    
+                    # Filter for messages that are part of this thread
+                    # Look for messages with thread_ts in their permalink or that reference the thread
+                    thread_messages = []
+                    original_message = None
+                    
+                    for match in all_matches:
+                        match_ts = match.get('ts', '')
+                        permalink = match.get('permalink', '')
+                        
+                        # Check if this is the original message
+                        if match_ts == thread_ts:
+                            original_message = match
+                            logger.info(f"Found original message: {match.get('text', '')[:50]}...")
+                        
+                        # Check if this message is part of the thread (has thread_ts in permalink)
+                        elif f"thread_ts={thread_ts}" in permalink:
+                            thread_messages.append(match)
+                            logger.info(f"Found thread message: {match.get('text', '')[:50]}...")
+                    
+                    logger.info(f"Found {len(thread_messages)} thread messages for thread {thread_ts}")
+                    
+                    if thread_messages:
+                        # Process thread messages for solutions and Jira tickets
+                        solutions = []
+                        jira_tickets = []
+                        
+                        # Enhanced Jira ticket detection patterns
+                        import re
+                        jira_patterns = [
+                            r'\b[A-Z0-9]{2,10}-\d+\b',
+                            r'acquia\.atlassian\.net/browse/([A-Z0-9]+-\d+)',
+                            r'atlassian\.net/browse/([A-Z0-9]+-\d+)',
+                            r'/browse/([A-Z0-9]+-\d+)',
+                            r'ticket\s*[:#]?\s*([A-Z0-9]+-\d+)',
+                            r'issue\s*[:#]?\s*([A-Z0-9]+-\d+)',
+                            r'jira\s*[:#]?\s*([A-Z0-9]+-\d+)',
+                        ]
+                        
+                        solution_keywords = [
+                            'solved', 'fixed', 'resolved', 'solution', 'answer', 'try this', 'here\'s how',
+                            'workaround', 'fix', 'restart', 'rerun', 'check', 'update', 'change',
+                            'working', 'works', 'success', 'done', 'complete', 'issue resolved',
+                            'problem solved', 'that worked', 'thanks', 'perfect', 'great',
+                            'run this', 'use this', 'do this', 'configure', 'set', 'enable',
+                            'created', 'opened'  # Added for Jira ticket creation messages
+                        ]
+                        
+                        # Process each thread message
+                        for i, match in enumerate(thread_messages, 1):
+                            text = match.get('text', '')
+                            text_lower = text.lower()
+                            user = match.get('user', 'Unknown')
+                            match_ts = match.get('ts', '')
+                            
+                            logger.info(f"Processing thread message {i}: {text[:80]}...")
+                            
+                            # Enhanced Jira ticket detection
+                            for pattern in jira_patterns:
+                                pattern_matches = re.findall(pattern, text, re.IGNORECASE)
+                                for pattern_match in pattern_matches:
+                                    ticket_key = pattern_match if isinstance(pattern_match, str) else pattern_match[0] if pattern_match else None
+                                    if ticket_key and ticket_key not in jira_tickets:
+                                        jira_tickets.append(ticket_key)
+                                        logger.info(f"🎫 Found Jira ticket reference: {ticket_key} in thread reply by {user} at {match_ts}")
+                            
+                            # Check for solution keywords
+                            matching_keywords = [kw for kw in solution_keywords if kw in text_lower]
+                            if matching_keywords:
+                                logger.info(f"Found solution keywords {matching_keywords} in reply: {text[:50]}...")
+                                solutions.append(text[:300])
+                        
+                        logger.info(f"Thread analysis complete: {len(solutions)} solutions, {len(jira_tickets)} Jira tickets")
+                        
+                        # Build enhanced summary
+                        summary_parts = []
+                        
+                        if jira_tickets:
+                            summary_parts.append(f"🎫 Jira tickets mentioned: {', '.join(jira_tickets[:3])}")
+                        
+                        if solutions:
+                            solution_text = ' | '.join(solutions[:2])
+                            summary_parts.append(f"Solutions found: {solution_text}")
+                        else:
+                            reply_count = len(thread_messages)
+                            summary_parts.append(f"{reply_count} replies discussing the issue")
+                        
+                        final_summary = ' | '.join(summary_parts) if summary_parts else ""
+                        logger.info(f"Final thread summary: {final_summary}")
+                        return final_summary
+                    else:
+                        logger.info("No thread messages found in search results")
+                else:
+                    logger.warning(f"Broad search failed: {response.get('error', 'Unknown error')}")
+                
+            except SlackApiError as search_error:
+                logger.warning(f"Search API failed for thread, trying fallback: {search_error}")
+                # Fallback: try to get thread via conversations API if we have access
+                return self._get_thread_summary_fallback(channel, thread_ts)
+            
+            return ""
+            
+        except Exception as e:
+            logger.error(f"Error getting thread summary via search: {e}")
+            return ""
+    
+    def _get_thread_summary_fallback(self, channel: str, thread_ts: str) -> str:
+        """Fallback method to get thread summary via conversations API"""
+        try:
+            # Get channel ID
+            channel_id = self._get_channel_id(channel)
+            if not channel_id:
+                return ""
+            
+            return self._get_thread_summary(channel_id, thread_ts)
+            
+        except Exception as e:
+            logger.error(f"Fallback thread summary failed: {e}")
+            return ""
+    
     def _get_thread_summary(self, channel_id: str, thread_ts: str) -> str:
         """Get a summary of thread replies"""
         try:
@@ -270,11 +434,36 @@ class SlackTool:
                 
                 solutions = []
                 all_replies = []
+                jira_tickets = []  # Track Jira ticket references
+                
+                # Enhanced Jira ticket detection patterns for Acquia Atlassian
+                import re
+                jira_patterns = [
+                    r'\b[A-Z0-9]{2,10}-\d+\b',  # Standard format: A1DEV-16638, PROJ-123
+                    r'acquia\.atlassian\.net/browse/([A-Z0-9]+-\d+)',  # Acquia Jira URLs
+                    r'atlassian\.net/browse/([A-Z0-9]+-\d+)',  # Generic Atlassian URLs
+                    r'/browse/([A-Z0-9]+-\d+)',  # Any browse URL
+                    r'ticket\s*[:#]?\s*([A-Z0-9]+-\d+)',  # "ticket: A1DEV-16638"
+                    r'issue\s*[:#]?\s*([A-Z0-9]+-\d+)',   # "issue: A1DEV-16638"
+                    r'jira\s*[:#]?\s*([A-Z0-9]+-\d+)',    # "jira: A1DEV-16638"
+                ]
                 
                 for i, reply in enumerate(replies):
                     text = reply.get('text', '')
                     text_lower = text.lower()
+                    user = reply.get('user', 'Unknown')
+                    
                     all_replies.append(f"Reply {i+1}: {text[:100]}...")
+                    
+                    # Enhanced Jira ticket detection in thread replies
+                    for pattern in jira_patterns:
+                        matches = re.findall(pattern, text, re.IGNORECASE)
+                        for match in matches:
+                            # Extract ticket key (handle tuple results from groups)
+                            ticket_key = match if isinstance(match, str) else match[0] if match else None
+                            if ticket_key and ticket_key not in jira_tickets:
+                                jira_tickets.append(ticket_key)
+                                logger.info(f"🎫 Found Jira ticket reference: {ticket_key} in thread reply by {user}")
                     
                     # Check for solution keywords
                     matching_keywords = [kw for kw in solution_keywords if kw in text_lower]
@@ -282,17 +471,25 @@ class SlackTool:
                         logger.info(f"Found solution keywords {matching_keywords} in reply: {text[:50]}...")
                         solutions.append(text[:300])  # Get more text for solutions
                 
-                logger.info(f"Found {len(solutions)} potential solutions")
+                logger.info(f"Found {len(solutions)} potential solutions and {len(jira_tickets)} Jira ticket references")
+                
+                # Build enhanced summary with Jira ticket information
+                summary_parts = []
+                
+                if jira_tickets:
+                    summary_parts.append(f"🎫 Jira tickets mentioned: {', '.join(jira_tickets[:3])}")
                 
                 if solutions:
                     # Return the most relevant solutions
                     solution_text = ' | '.join(solutions[:2])
-                    return f"Solutions found: {solution_text}"
+                    summary_parts.append(f"Solutions found: {solution_text}")
                 else:
                     # Return summary with some actual content
                     reply_count = len(replies)
                     sample_replies = ' | '.join(all_replies[:2])
-                    return f"{reply_count} replies discussing: {sample_replies}"
+                    summary_parts.append(f"{reply_count} replies discussing: {sample_replies}")
+                
+                return ' | '.join(summary_parts) if summary_parts else ""
             else:
                 logger.info("No thread replies found or API call failed")
             
@@ -304,3 +501,59 @@ class SlackTool:
         except Exception as e:
             logger.error(f"Unexpected error getting thread replies: {e}")
             return f"Error processing thread: {str(e)}"
+    
+    def _get_thread_messages(self, channel_id: str, thread_ts: str) -> List[Dict]:
+        """Get full thread messages for detailed analysis with enhanced Jira ticket detection"""
+        try:
+            if not thread_ts:
+                return []
+            
+            response = self.client.conversations_replies(
+                channel=channel_id,
+                ts=thread_ts,
+                limit=50  # Get more messages for comprehensive analysis
+            )
+            
+            if response['ok']:
+                messages = response['messages']
+                
+                # Enhanced processing: Add Jira ticket detection to each message
+                import re
+                jira_patterns = [
+                    r'\b[A-Z0-9]{2,10}-\d+\b',  # Standard format: A1DEV-16638, PROJ-123
+                    r'acquia\.atlassian\.net/browse/([A-Z0-9]+-\d+)',  # Acquia Jira URLs
+                    r'atlassian\.net/browse/([A-Z0-9]+-\d+)',  # Generic Atlassian URLs
+                    r'/browse/([A-Z0-9]+-\d+)',  # Any browse URL
+                    r'ticket\s*[:#]?\s*([A-Z0-9]+-\d+)',  # "ticket: A1DEV-16638"
+                    r'issue\s*[:#]?\s*([A-Z0-9]+-\d+)',   # "issue: A1DEV-16638"
+                    r'jira\s*[:#]?\s*([A-Z0-9]+-\d+)',    # "jira: A1DEV-16638"
+                ]
+                
+                # Add Jira ticket detection to each message
+                for message in messages:
+                    text = message.get('text', '')
+                    jira_tickets = []
+                    
+                    for pattern in jira_patterns:
+                        matches = re.findall(pattern, text, re.IGNORECASE)
+                        for match in matches:
+                            ticket_key = match if isinstance(match, str) else match[0] if match else None
+                            if ticket_key and ticket_key not in jira_tickets:
+                                jira_tickets.append(ticket_key)
+                    
+                    # Add jira_tickets to message metadata
+                    message['jira_tickets'] = jira_tickets
+                    if jira_tickets:
+                        logger.info(f"🎫 Found Jira tickets {jira_tickets} in message by {message.get('user', 'Unknown')}")
+                
+                return messages
+            else:
+                logger.warning(f"Failed to get thread messages: {response.get('error', 'Unknown error')}")
+                return []
+                
+        except SlackApiError as e:
+            logger.error(f"Error getting thread messages for {thread_ts}: {e}")
+            return []
+        except Exception as e:
+            logger.error(f"Unexpected error getting thread messages: {e}")
+            return []
