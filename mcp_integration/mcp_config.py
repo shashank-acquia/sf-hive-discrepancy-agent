@@ -7,6 +7,10 @@ import os
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -26,52 +30,101 @@ class MCPConfigManager:
         self.servers = {}
         self._load_default_configs()
     
+    def _extract_site_name_from_url(self, url: Optional[str]) -> Optional[str]:
+        """Extract site name from Atlassian URL"""
+        if not url:
+            return None
+        
+        # Remove protocol and trailing slashes
+        url = url.replace('https://', '').replace('http://', '').rstrip('/')
+        
+        # Extract site name from patterns like:
+        # mycompany.atlassian.net -> mycompany
+        # mycompany.atlassian.com -> mycompany
+        if '.atlassian.' in url:
+            return url.split('.atlassian.')[0]
+        
+        # If it's just the site name already, return it
+        if '.' not in url:
+            return url
+        
+        return None
+    
     def _load_default_configs(self):
         """Load default MCP server configurations"""
         
         # Atlassian MCP Server (Jira + Confluence)
         # Use existing environment variables from .env
         atlassian_env = {}
-        jira_token = os.getenv('JIRA_API_TOKEN')
-        confluence_token = os.getenv('CONFLUENCE_API_TOKEN')
         
-        if jira_token or confluence_token:
+        # Check for both direct ATLASSIAN_ vars and fallback to JIRA_/CONFLUENCE_
+        atlassian_token = os.getenv('ATLASSIAN_API_TOKEN') or os.getenv('JIRA_API_TOKEN') or os.getenv('CONFLUENCE_API_TOKEN')
+        atlassian_site_name = os.getenv('ATLASSIAN_SITE_NAME') or self._extract_site_name_from_url(
+            os.getenv('ATLASSIAN_INSTANCE_URL') or os.getenv('JIRA_SERVER') or os.getenv('CONFLUENCE_SERVER')
+        )
+        atlassian_email = os.getenv('ATLASSIAN_USER_EMAIL') or os.getenv('ATLASSIAN_EMAIL') or os.getenv('JIRA_USERNAME') or os.getenv('CONFLUENCE_USERNAME')
+        
+        if atlassian_token and atlassian_site_name and atlassian_email:
             atlassian_env.update({
-                'ATLASSIAN_API_TOKEN': jira_token or confluence_token,
-                'ATLASSIAN_DOMAIN': 'acquia.atlassian.net',  # Extracted from JIRA_SERVER
-                'ATLASSIAN_EMAIL': os.getenv('JIRA_USERNAME', os.getenv('CONFLUENCE_USERNAME', '')),
+                'ATLASSIAN_API_TOKEN': atlassian_token,
+                'ATLASSIAN_SITE_NAME': atlassian_site_name,
+                'ATLASSIAN_USER_EMAIL': atlassian_email,
+                # Keep legacy variables for backward compatibility
+                'ATLASSIAN_INSTANCE_URL': os.getenv('ATLASSIAN_INSTANCE_URL', ''),
+                'ATLASSIAN_EMAIL': os.getenv('ATLASSIAN_EMAIL', ''),
                 'JIRA_SERVER': os.getenv('JIRA_SERVER', ''),
                 'CONFLUENCE_SERVER': os.getenv('CONFLUENCE_SERVER', ''),
                 'JIRA_PROJECT_KEY': os.getenv('JIRA_PROJECT_KEY', ''),
                 'CONFLUENCE_SPACES': os.getenv('CONFLUENCE_SPACES', '')
             })
         
-        self.servers['atlassian'] = MCPServerConfig(
-            name='atlassian',
+        # Split into separate Jira and Confluence servers for better reliability
+        self.servers['jira'] = MCPServerConfig(
+            name='jira',
             command='npx',
-            args=['-y', '@modelcontextprotocol/server-atlassian'],
+            args=['-y', '@aashari/mcp-server-atlassian-jira'],
             env=atlassian_env,
-            enabled=bool(jira_token or confluence_token)
+            enabled=bool(atlassian_token and atlassian_site_name and atlassian_email)
+        )
+        
+        self.servers['confluence'] = MCPServerConfig(
+            name='confluence',
+            command='npx',
+            args=['-y', '@aashari/mcp-server-atlassian-confluence'],
+            env=atlassian_env,
+            enabled=bool(atlassian_token and atlassian_site_name and atlassian_email)
         )
         
         # Slack MCP Server
         slack_env = {}
-        if os.getenv('SLACK_BOT_TOKEN'):
+        # Check for available Slack tokens
+        slack_user_token = os.getenv('SLACK_USER_TOKEN')  # xoxp- token from .env
+        slack_bot_token = os.getenv('SLACK_BOT_TOKEN')    # xoxb- token from .env
+        slack_app_token = os.getenv('SLACK_APP_TOKEN')    # xapp- token from .env
+        
+        # The @modelcontextprotocol/server-slack expects SLACK_USER_TOKEN
+        slack_auth_available = slack_user_token or slack_bot_token
+        
+        if slack_auth_available:
             slack_env.update({
-                'SLACK_BOT_TOKEN': os.getenv('SLACK_BOT_TOKEN'),
-                'SLACK_APP_TOKEN': os.getenv('SLACK_APP_TOKEN', ''),
+                # Primary authentication for @modelcontextprotocol/server-slack
+                'SLACK_USER_TOKEN': slack_user_token or slack_bot_token,
+                'SLACK_BOT_TOKEN': slack_bot_token or '',
+                'SLACK_APP_TOKEN': slack_app_token or '',
                 'SLACK_SIGNING_SECRET': os.getenv('SLACK_SIGNING_SECRET', ''),
-                'SLACK_USER_TOKEN': os.getenv('SLACK_USER_TOKEN', ''),
                 'SLACK_SEARCH_CHANNELS': os.getenv('SLACK_SEARCH_CHANNELS', ''),
-                'SLACK_TEAM_ID': os.getenv('SLACK_TEAM_ID', '')
+                'SLACK_TEAM_ID': os.getenv('SLACK_TEAM_ID', ''),
+                # Additional configuration
+                'SLACK_PORT': os.getenv('SLACK_PORT', '3000'),
+                'SLACK_HOST': os.getenv('SLACK_HOST', '127.0.0.1')
             })
         
         self.servers['slack'] = MCPServerConfig(
             name='slack',
             command='npx',
-            args=['-y', '@zencoderai/mcp-server-slack'],
+            args=['-y', '@modelcontextprotocol/server-slack'],
             env=slack_env,
-            enabled=bool(os.getenv('SLACK_BOT_TOKEN'))
+            enabled=bool(slack_auth_available)
         )
         
         # GitHub MCP Server (for additional context)
@@ -144,27 +197,29 @@ class MCPConfigManager:
                 continue
             
             # Check if required environment variables are set
-            if name == 'atlassian':
-                # Check for either JIRA or Confluence tokens (using existing env vars)
-                jira_token = os.getenv('JIRA_API_TOKEN')
-                confluence_token = os.getenv('CONFLUENCE_API_TOKEN')
-                jira_username = os.getenv('JIRA_USERNAME')
-                confluence_username = os.getenv('CONFLUENCE_USERNAME')
+            if name in ['jira', 'confluence']:
+                # Use the same fallback logic as in _load_default_configs
+                atlassian_token = os.getenv('ATLASSIAN_API_TOKEN') or os.getenv('JIRA_API_TOKEN') or os.getenv('CONFLUENCE_API_TOKEN')
+                atlassian_site_name = os.getenv('ATLASSIAN_SITE_NAME') or self._extract_site_name_from_url(
+                    os.getenv('ATLASSIAN_INSTANCE_URL') or os.getenv('JIRA_SERVER') or os.getenv('CONFLUENCE_SERVER')
+                )
+                atlassian_email = os.getenv('ATLASSIAN_USER_EMAIL') or os.getenv('ATLASSIAN_EMAIL') or os.getenv('JIRA_USERNAME') or os.getenv('CONFLUENCE_USERNAME')
                 
-                if not (jira_token or confluence_token):
+                if not (atlassian_token and atlassian_site_name and atlassian_email):
                     status[name] = "Disabled - missing required environment variables"
-                    config.enabled = False
-                elif not (jira_username or confluence_username):
-                    status[name] = "Missing username configuration"
                     config.enabled = False
                 else:
                     status[name] = "Ready"
             
             elif name == 'slack':
-                required_vars = ['SLACK_BOT_TOKEN']
-                missing = [var for var in required_vars if not os.getenv(var)]
-                if missing:
-                    status[name] = f"Missing environment variables: {', '.join(missing)}"
+                # Check for available Slack tokens (matching the _load_default_configs logic)
+                slack_user_token = os.getenv('SLACK_USER_TOKEN')
+                slack_bot_token = os.getenv('SLACK_BOT_TOKEN')
+                
+                slack_auth_available = slack_user_token or slack_bot_token
+                
+                if not slack_auth_available:
+                    status[name] = "Missing Slack authentication - need SLACK_USER_TOKEN or SLACK_BOT_TOKEN"
                     config.enabled = False
                 else:
                     status[name] = "Ready"

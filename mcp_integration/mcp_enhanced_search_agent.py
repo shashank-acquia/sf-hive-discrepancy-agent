@@ -19,15 +19,9 @@ except ImportError:
         HumanMessage = None
         SystemMessage = None
 
-logger = logging.getLogger(__name__)
+from .mcp_protocol_client import MCPProtocolClient, MCPServerConfig
 
-@dataclass
-class MCPServerConfig:
-    name: str
-    command: str
-    args: List[str]
-    env: Dict[str, str]
-    transport: str = "stdio"  # stdio, sse, or http
+logger = logging.getLogger(__name__)
 
 @dataclass
 class SearchResult:
@@ -46,6 +40,7 @@ class MCPEnhancedSearchAgent:
     
     def __init__(self):
         self.mcp_servers = {}
+        self.mcp_client = MCPProtocolClient()
         self.llm = self._initialize_llm()
         self._setup_mcp_servers()
         
@@ -66,50 +61,19 @@ class MCPEnhancedSearchAgent:
     def _setup_mcp_servers(self):
         """Setup MCP server configurations for Slack, Jira, and Confluence"""
         
-        # Atlassian MCP Server (Official - supports both Jira and Confluence)
-        if os.getenv('ATLASSIAN_API_TOKEN') and os.getenv('ATLASSIAN_INSTANCE_URL'):
-            self.mcp_servers['atlassian'] = MCPServerConfig(
-                name="atlassian",
-                command="npx",
-                args=["-y", "@atlassian/mcp-server"],
-                env={
-                    "ATLASSIAN_API_TOKEN": os.getenv('ATLASSIAN_API_TOKEN'),
-                    "ATLASSIAN_INSTANCE_URL": os.getenv('ATLASSIAN_INSTANCE_URL'),
-                    "ATLASSIAN_EMAIL": os.getenv('ATLASSIAN_EMAIL', '')
-                }
-            )
+        # Import the MCP config manager to get proper configurations
+        from .mcp_config import mcp_config
         
-        # Slack MCP Server (Community - enhanced version)
-        if os.getenv('SLACK_BOT_TOKEN'):
-            self.mcp_servers['slack'] = MCPServerConfig(
-                name="slack",
-                command="npx",
-                args=["-y", "@zencoderai/slack-mcp-server"],
-                env={
-                    "SLACK_BOT_TOKEN": os.getenv('SLACK_BOT_TOKEN'),
-                    "SLACK_USER_TOKEN": os.getenv('SLACK_USER_TOKEN', ''),
-                    "SLACK_SIGNING_SECRET": os.getenv('SLACK_SIGNING_SECRET', '')
-                }
-            )
+        # Use the centralized MCP configuration
+        enabled_servers = mcp_config.get_enabled_servers()
         
-        # GitHub MCP Server (for additional context from code repositories)
-        if os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN'):
-            self.mcp_servers['github'] = MCPServerConfig(
-                name="github",
-                command="npx",
-                args=["-y", "@modelcontextprotocol/server-github"],
-                env={
-                    "GITHUB_PERSONAL_ACCESS_TOKEN": os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')
-                }
+        for name, config in enabled_servers.items():
+            self.mcp_servers[name] = MCPServerConfig(
+                name=config.name,
+                command=config.command,
+                args=config.args,
+                env=config.env or {}
             )
-        
-        # Memory MCP Server (for persistent context across searches)
-        self.mcp_servers['memory'] = MCPServerConfig(
-            name="memory",
-            command="npx",
-            args=["-y", "@modelcontextprotocol/server-memory"],
-            env={}
-        )
 
             # Google Docs MCP Server (for document search with recursive folder support)
         if os.getenv('MCP_GOOGLE_DOC_ENABLED', 'false').lower() == 'true':
@@ -170,7 +134,7 @@ class MCPEnhancedSearchAgent:
             # Search each platform using available methods
             for platform in platforms:
                 try:
-                    if platform == 'jira' and 'atlassian' in self.mcp_servers:
+                    if platform == 'jira' and 'jira' in self.mcp_servers:
                         # Try MCP server first, fallback to existing tools
                         try:
                             jira_results = await self._search_atlassian(query, 'jira')
@@ -181,7 +145,7 @@ class MCPEnhancedSearchAgent:
                             jira_results = await self._search_jira_fallback(query)
                             cross_platform_results.extend(jira_results)
                     
-                    elif platform == 'confluence' and 'atlassian' in self.mcp_servers:
+                    elif platform == 'confluence' and 'confluence' in self.mcp_servers:
                         # Try MCP server first, fallback to existing tools
                         try:
                             confluence_results = await self._search_atlassian(query, 'confluence')
@@ -321,25 +285,26 @@ class MCPEnhancedSearchAgent:
                 # Sanitize query for JQL
                 sanitized_query = self._sanitize_query_for_jql(query)
                 mcp_query = {
-                    "tool": "search_issues",
+                    "tool": "jira_ls_issues",
                     "parameters": {
                         "jql": f'text ~ "{sanitized_query}" OR summary ~ "{sanitized_query}" OR description ~ "{sanitized_query}"',
-                        "maxResults": 20
+                        "limit": 20
                     }
                 }
             else:  # confluence
                 # Sanitize query for CQL
                 sanitized_query = self._sanitize_query_for_cql(query)
                 mcp_query = {
-                    "tool": "search_content",
+                    "tool": "conf_search",
                     "parameters": {
-                        "cql": f'text ~ "{sanitized_query}"',
+                        "query": sanitized_query,
                         "limit": 20
                     }
                 }
             
-            # Execute MCP server call
-            result = await self._execute_mcp_call('atlassian', mcp_query)
+            # Execute MCP server call - use the correct server name
+            server_name = 'jira' if platform == 'jira' else 'confluence'
+            result = await self._execute_mcp_call(server_name, mcp_query)
             
             # Parse results into SearchResult objects
             search_results = []
@@ -452,61 +417,36 @@ class MCPEnhancedSearchAgent:
             return []
     
     async def _execute_mcp_call(self, server_name: str, query: Dict) -> Dict:
-        """Execute an MCP server call with timeout and error handling"""
+        """Execute an MCP server call using proper MCP protocol communication"""
         if server_name not in self.mcp_servers:
             raise ValueError(f"MCP server {server_name} not configured")
         
         server_config = self.mcp_servers[server_name]
         
-        # Create temporary file for MCP communication
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            json.dump(query, f)
-            query_file = f.name
-        
         try:
-            # Execute MCP server command with shorter timeout to fail fast
-            cmd = [server_config.command] + server_config.args + ['--query', query_file]
+            logger.info(f"🔌 Starting MCP protocol communication with {server_name}")
             
-            # Increased timeout to 8 seconds for MCP server startup
-            process = await asyncio.wait_for(
-                asyncio.create_subprocess_exec(
-                    *cmd,
-                    env={**os.environ, **server_config.env},
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                ),
-                timeout=8.0
-            )
+            # Start the MCP server using proper protocol
+            await self.mcp_client.start_server(server_config)
             
-            # Increased communication timeout to 12 seconds
-            stdout, stderr = await asyncio.wait_for(
-                process.communicate(),
-                timeout=12.0
-            )
+            # Extract tool name and parameters from query
+            tool_name = query.get('tool', '')
+            parameters = query.get('parameters', {})
             
-            if process.returncode != 0:
-                raise Exception(f"MCP server error: {stderr.decode()}")
+            if not tool_name:
+                raise ValueError(f"No tool specified in query: {query}")
             
-            return json.loads(stdout.decode())
+            logger.info(f"🛠️ Calling MCP tool '{tool_name}' with parameters: {parameters}")
             
-        except asyncio.TimeoutError:
-            logger.error(f"MCP server {server_name} call timed out")
-            raise Exception(f"MCP server {server_name} timed out")
-        except FileNotFoundError:
-            logger.error(f"MCP server command not found: {server_config.command}")
-            raise Exception(f"MCP server {server_name} not installed")
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON response from MCP server {server_name}: {e}")
-            raise Exception(f"Invalid response from MCP server {server_name}")
+            # Call the tool using MCP protocol
+            result = await self.mcp_client.call_tool(server_name, tool_name, parameters)
+            
+            logger.info(f"✅ MCP server {server_name} returned result successfully")
+            return result
+            
         except Exception as e:
-            logger.error(f"MCP server {server_name} call failed: {e}")
+            logger.error(f"❌ MCP server {server_name} protocol call failed: {e}")
             raise Exception(f"MCP server {server_name} failed: {str(e)}")
-        finally:
-            # Clean up temporary file
-            try:
-                os.unlink(query_file)
-            except:
-                pass
     
     async def _store_search_context(self, query: str, context: Optional[Dict]):
         """Store search context in memory server for future reference"""

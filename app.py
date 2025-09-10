@@ -154,151 +154,276 @@ def perform_search(query, channel=None):
         }
 
 def perform_search_mcp_fallback(query, channel=None):
-    """Fallback MCP search function (original implementation)"""
+    """MCP enhanced search function with same functionality as perform_search"""
     try:
-        if not MCP_AVAILABLE:
-            return {
-                'success': False,
-                'error': 'MCP integration not available'
-            }
+        logger.info(f"🔍 Starting MCP enhanced search for query: '{query}'")
         
-        # Import MCP agent directly
-        from mcp_integration.mcp_enhanced_search_agent import MCPEnhancedSearchAgent
-        import asyncio
-        
-        # Create MCP agent
-        mcp_agent = MCPEnhancedSearchAgent()
-        
-        # Run MCP-only search with timeout
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
+        # First, try MCP enhanced search if available
+        if MCP_AVAILABLE and MCP_SERVERS_READY:
             try:
-                logger.info(f"🔍 Starting MCP fallback search for query: '{query}'")
-                logger.info(f"🚀 Searching platforms: ['jira', 'slack', 'confluence']")
+                # Import MCP agent directly
+                from mcp_integration.mcp_enhanced_search_agent import MCPEnhancedSearchAgent
+                import asyncio
                 
-                # Add timeout to prevent hanging (30 seconds)
-                mcp_results = loop.run_until_complete(
-                    asyncio.wait_for(
-                        mcp_agent.enhanced_search(query, ['jira', 'slack', 'confluence', 'google_docs']),
-                        timeout=30.0
+                # Create MCP agent
+                mcp_agent = MCPEnhancedSearchAgent()
+                
+                # Run MCP search with timeout
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    logger.info(f"🚀 Searching platforms via MCP: ['jira', 'slack', 'confluence', 'google_docs']")
+                    
+                    # Add timeout to prevent hanging (30 seconds)
+                    mcp_results = loop.run_until_complete(
+                        asyncio.wait_for(
+                            mcp_agent.enhanced_search(query, ['jira', 'slack', 'confluence', 'google_docs']),
+                            timeout=30.0
+                        )
                     )
-                )
-                
-                # Log detailed MCP server responses (using both logger and print for visibility)
-                log_separator = "=" * 80
-                mcp_header = "🚀 MCP SERVER RESPONSES"
-                
-                print(log_separator)
-                print(mcp_header)
-                print(log_separator)
-                logger.info(log_separator)
-                logger.info(mcp_header)
-                logger.info(log_separator)
-                
-                # Log full MCP results structure
-                full_results_msg = f"📊 FULL MCP RESULTS: {json.dumps(mcp_results, indent=2, default=str)}"
-                print(full_results_msg)
-                logger.info(full_results_msg)
-                
-                # Log individual platform results
-                results = mcp_results.get('results', []) if isinstance(mcp_results, dict) else []
-                slack_results = [r for r in results if r.get('platform', '').lower() == 'slack']
-                jira_results = [r for r in results if r.get('platform', '').lower() == 'jira']
-                confluence_results = [r for r in results if r.get('platform', '').lower() == 'confluence']
-                google_docs_results = [r for r in results if r.get('platform', '').lower() == 'google_docs']
-                
-                slack_header = f"💬 SLACK MCP SERVER RESPONSE ({len(slack_results)} results):"
-                print(slack_header)
-                logger.info(slack_header)
-                for i, result in enumerate(slack_results, 1):
-                    slack_result_msg = f"  Slack Result {i}: {json.dumps(result, indent=4, default=str)}"
-                    print(slack_result_msg)
-                    logger.info(slack_result_msg)
-                
-                jira_header = f"🎫 JIRA MCP SERVER RESPONSE ({len(jira_results)} results):"
-                print(jira_header)
-                logger.info(jira_header)
-                for i, result in enumerate(jira_results, 1):
-                    jira_result_msg = f"  Jira Result {i}: {json.dumps(result, indent=4, default=str)}"
-                    print(jira_result_msg)
-                    logger.info(jira_result_msg)
-                
-                confluence_header = f"📄 CONFLUENCE MCP SERVER RESPONSE ({len(confluence_results)} results):"
-                print(confluence_header)
-                logger.info(confluence_header)
-                for i, result in enumerate(confluence_results, 1):
-                    confluence_result_msg = f"  Confluence Result {i}: {json.dumps(result, indent=4, default=str)}"
-                    print(confluence_result_msg)
-                    logger.info(confluence_result_msg)
-                
-                google_docs_header = f"📄 GOOGLE DOCS MCP SERVER RESPONSE ({len(google_docs_results)} results):"
-                print(google_docs_header)
-                logger.info(google_docs_header)
-                for i, result in enumerate(google_docs_results, 1):
-                    google_docs_result_msg = f"  Google Docs Result {i}: {json.dumps(result, indent=4, default=str)}"
-                    print(google_docs_result_msg)
-                    logger.info(google_docs_result_msg)
-                
-                # Log platform insights
-                platform_insights = mcp_results.get('platform_insights', {})
-                insights_msg = f"🧠 PLATFORM INSIGHTS: {json.dumps(platform_insights, indent=2, default=str)}"
-                print(insights_msg)
-                logger.info(insights_msg)
-                
-                # Log metadata
-                metadata = mcp_results.get('metadata', {})
-                metadata_msg = f"📈 METADATA: {json.dumps(metadata, indent=2, default=str)}"
-                print(metadata_msg)
-                logger.info(metadata_msg)
-                
-                print(log_separator)
-                logger.info(log_separator)
-                
-            finally:
-                loop.close()
-            
-            # Format MCP results for API response
-            search_results = {
-                'success': True,
-                'mcp_enhanced': True,
-                'query': mcp_results.get('query', query),
-                'total_results': mcp_results.get('total_results', 0),
-                'platforms_searched': mcp_results.get('platforms_searched', []),
-                'results': mcp_results.get('results', []),
-                'formatted_response': mcp_results.get('summary', ''),
-                'additional_insights': mcp_results.get('summary', ''),
-                'cross_platform_results': mcp_results.get('results', []),
-                'semantic_score': mcp_results.get('metadata', {}).get('avg_relevance_score', 0),
-                'platform_insights': mcp_results.get('platform_insights', {}),
-                'metadata': mcp_results.get('metadata', {})
-            }
-            
-            logger.info(f"✅ MCP-only search completed: {search_results['total_results']} results across {len(search_results['platforms_searched'])} platforms")
-            return search_results
-            
-        except asyncio.TimeoutError:
-            logger.error(f"❌ MCP search timed out after 30 seconds for query: '{query}'")
-            return {
-                'success': False,
-                'error': 'Search timed out after 30 seconds. Please try a simpler query or try again later.'
-            }
+                    
+                    # Convert MCP results to the same format as perform_search
+                    search_results = {
+                        'slack_messages': [],
+                        'jira_issues': [],
+                        'confluence_pages': []
+                    }
+                    
+                    # Parse MCP results and organize by platform (same as perform_search)
+                    results = mcp_results.get('results', []) if isinstance(mcp_results, dict) else []
+                    for item in results:
+                        platform = item.get('platform', '').lower()
+                        metadata = item.get('metadata', {})
+                        
+                        if platform == 'slack':
+                            search_results['slack_messages'].append({
+                                'channel': metadata.get('channel', 'unknown'),
+                                'user': metadata.get('user', 'Unknown'),
+                                'timestamp': metadata.get('timestamp', metadata.get('ts')),
+                                'text': item.get('content', item.get('text', 'No content')),
+                                'permalink': item.get('url', item.get('permalink')),
+                                'thread_summary': metadata.get('thread_summary', ''),
+                                'reply_count': metadata.get('reply_count', 0),
+                                'score': metadata.get('score', 0)
+                            })
+                        elif platform == 'jira':
+                            search_results['jira_issues'].append({
+                                'key': item.get('key', item.get('id', 'Unknown')),
+                                'summary': item.get('title', item.get('summary', 'No summary')),
+                                'status': metadata.get('status', 'Unknown'),
+                                'priority': metadata.get('priority', 'Unknown'),
+                                'assignee': metadata.get('assignee', 'Unassigned'),
+                                'description': item.get('content', item.get('description')),
+                                'url': item.get('url'),
+                                'project': metadata.get('project', 'Unknown'),
+                                'issue_type': metadata.get('issue_type', 'Unknown'),
+                                'relevance_score': metadata.get('relevance_score', 0),
+                                'search_strategy': 'mcp_enhanced'
+                            })
+                        elif platform == 'confluence':
+                            search_results['confluence_pages'].append({
+                                'title': item.get('title', 'Untitled'),
+                                'space': metadata.get('space', 'Unknown'),
+                                'lastModified': metadata.get('last_modified', metadata.get('updated')),
+                                'excerpt': item.get('content', item.get('excerpt')),
+                                'url': item.get('url'),
+                                'type': metadata.get('type', 'page'),
+                                'author': metadata.get('author', 'Unknown')
+                            })
+                    
+                    # Generate formatted response using the enhanced agent (same as perform_search)
+                    try:
+                        formatted_response = search_agent._generate_llm_response(query, search_results)
+                    except Exception as e:
+                        logger.warning(f"LLM response generation failed: {e}")
+                        formatted_response = search_agent._generate_fallback_response(search_results)
+                    
+                    # Format results for UI compatibility (same structure as perform_search)
+                    formatted_results = {
+                        'success': True,
+                        'query': query,
+                        'total_results': (
+                            len(search_results.get('slack_messages', [])) + 
+                            len(search_results.get('jira_issues', [])) + 
+                            len(search_results.get('confluence_pages', []))
+                        ),
+                        'platforms_searched': ['slack', 'jira', 'confluence'],
+                        'results': [],
+                        'formatted_response': formatted_response,
+                        'search_results': search_results,
+                        'mcp_enhanced': True,
+                        'mcp_available': MCP_AVAILABLE,
+                        'mcp_servers_ready': MCP_SERVERS_READY
+                    }
+                    
+                    # Convert to unified results format (same as perform_search)
+                    for msg in search_results.get('slack_messages', []):
+                        formatted_results['results'].append({
+                            'platform': 'slack',
+                            'title': f"Message in #{msg.get('channel', 'unknown')}",
+                            'content': msg.get('text', ''),
+                            'url': msg.get('permalink', ''),
+                            'metadata': {
+                                'channel': msg.get('channel'),
+                                'user': msg.get('user'),
+                                'timestamp': msg.get('timestamp'),
+                                'thread_summary': msg.get('thread_summary', ''),
+                                'reply_count': msg.get('reply_count', 0),
+                                'score': msg.get('score', 0)
+                            }
+                        })
+                    
+                    for issue in search_results.get('jira_issues', []):
+                        formatted_results['results'].append({
+                            'platform': 'jira',
+                            'key': issue.get('key'),
+                            'title': issue.get('summary', ''),
+                            'content': issue.get('description', ''),
+                            'url': issue.get('url', ''),
+                            'metadata': {
+                                'status': issue.get('status'),
+                                'priority': issue.get('priority'),
+                                'assignee': issue.get('assignee'),
+                                'project': issue.get('project'),
+                                'issue_type': issue.get('issue_type'),
+                                'relevance_score': issue.get('relevance_score', 0),
+                                'search_strategy': issue.get('search_strategy', 'mcp_enhanced')
+                            }
+                        })
+                    
+                    for page in search_results.get('confluence_pages', []):
+                        formatted_results['results'].append({
+                            'platform': 'confluence',
+                            'title': page.get('title', ''),
+                            'content': page.get('excerpt', ''),
+                            'url': page.get('url', ''),
+                            'metadata': {
+                                'space': page.get('space'),
+                                'last_modified': page.get('lastModified'),
+                                'author': page.get('author'),
+                                'type': page.get('type')
+                            }
+                        })
+                    
+                    logger.info(f"✅ MCP enhanced search completed: {formatted_results['total_results']} results found")
+                    logger.info(f"📊 Results breakdown - Slack: {len(search_results.get('slack_messages', []))}, JIRA: {len(search_results.get('jira_issues', []))}, Confluence: {len(search_results.get('confluence_pages', []))}")
+                    
+                    return formatted_results
+                    
+                finally:
+                    loop.close()
+                    
+            except asyncio.TimeoutError:
+                logger.warning(f"⚠️ MCP search timed out for query: '{query}', falling back to direct API search")
+                # Fall back to direct API search
+                pass
+            except Exception as e:
+                logger.warning(f"⚠️ MCP search failed: {e}, falling back to direct API search")
+                # Fall back to direct API search
+                pass
+        
+        # Fallback to direct API search (same logic as perform_search)
+        logger.info(f"🔍 Using direct API search as fallback for query: '{query}'")
+        
+        # Use the enhanced SlackSearchAgent directly (same as perform_search)
+        search_results = search_agent._search_all_platforms(query)
+        
+        # Format results for UI compatibility (same as perform_search)
+        formatted_results = {
+            'success': True,
+            'query': query,
+            'total_results': (
+                len(search_results.get('slack_messages', [])) + 
+                len(search_results.get('jira_issues', [])) + 
+                len(search_results.get('confluence_pages', []))
+            ),
+            'platforms_searched': ['slack', 'jira', 'confluence'],
+            'results': [],
+            'formatted_response': '',
+            'search_results': search_results,
+            'mcp_enhanced': False,  # Fallback mode
+            'mcp_available': MCP_AVAILABLE,
+            'mcp_servers_ready': MCP_SERVERS_READY
+        }
+        
+        # Convert to unified results format (same as perform_search)
+        for msg in search_results.get('slack_messages', []):
+            formatted_results['results'].append({
+                'platform': 'slack',
+                'title': f"Message in #{msg.get('channel', 'unknown')}",
+                'content': msg.get('text', ''),
+                'url': msg.get('permalink', ''),
+                'metadata': {
+                    'channel': msg.get('channel'),
+                    'user': msg.get('user'),
+                    'timestamp': msg.get('timestamp'),
+                    'thread_summary': msg.get('thread_summary', ''),
+                    'reply_count': msg.get('reply_count', 0),
+                    'score': msg.get('score', 0)
+                }
+            })
+        
+        for issue in search_results.get('jira_issues', []):
+            formatted_results['results'].append({
+                'platform': 'jira',
+                'key': issue.get('key'),
+                'title': issue.get('summary', ''),
+                'content': issue.get('description', ''),
+                'url': issue.get('url', ''),
+                'metadata': {
+                    'status': issue.get('status'),
+                    'priority': issue.get('priority'),
+                    'assignee': issue.get('assignee'),
+                    'project': issue.get('project'),
+                    'issue_type': issue.get('issue_type'),
+                    'relevance_score': issue.get('relevance_score', 0),
+                    'search_strategy': issue.get('search_strategy', 'direct_query')
+                }
+            })
+        
+        for page in search_results.get('confluence_pages', []):
+            formatted_results['results'].append({
+                'platform': 'confluence',
+                'title': page.get('title', ''),
+                'content': page.get('excerpt', ''),
+                'url': page.get('url', ''),
+                'metadata': {
+                    'space': page.get('space'),
+                    'last_modified': page.get('lastModified'),
+                    'author': page.get('author'),
+                    'type': page.get('type')
+                }
+            })
+        
+        # Generate formatted response using the enhanced agent (same as perform_search)
+        try:
+            formatted_response = search_agent._generate_llm_response(query, search_results)
+            formatted_results['formatted_response'] = formatted_response
         except Exception as e:
-            logger.error(f"❌ MCP search failed: {e}")
-            import traceback
-            logger.error(f"❌ Full traceback: {traceback.format_exc()}")
-            return {
-                'success': False,
-                'error': f'MCP search failed: {str(e)}'
-            }
+            logger.warning(f"LLM response generation failed: {e}")
+            formatted_results['formatted_response'] = search_agent._generate_fallback_response(search_results)
+        
+        logger.info(f"✅ Fallback search completed: {formatted_results['total_results']} results found")
+        logger.info(f"📊 Results breakdown - Slack: {len(search_results.get('slack_messages', []))}, JIRA: {len(search_results.get('jira_issues', []))}, Confluence: {len(search_results.get('confluence_pages', []))}")
+        
+        # Log JIRA results with relevance scores for debugging (same as perform_search)
+        jira_results = search_results.get('jira_issues', [])
+        if jira_results:
+            logger.info("🎫 JIRA Results with relevance scores:")
+            for i, issue in enumerate(jira_results[:5], 1):
+                logger.info(f"  {i}. {issue.get('key', 'Unknown')}: {issue.get('summary', 'No summary')}")
+                logger.info(f"     Relevance: {issue.get('relevance_score', 0)}, Strategy: {issue.get('search_strategy', 'unknown')}")
+                logger.info(f"     Status: {issue.get('status', 'Unknown')}, URL: {issue.get('url', 'No URL')}")
+        
+        return formatted_results
         
     except Exception as e:
-        logger.error(f"❌ Error performing MCP search: {e}")
+        logger.error(f"❌ Error performing MCP enhanced search: {e}")
         import traceback
         logger.error(f"❌ Full traceback: {traceback.format_exc()}")
         return {
             'success': False,
-            'error': f'Search failed: {str(e)}'
+            'error': f'Enhanced search failed: {str(e)}'
         }
 
 @slack_app.event("app_mention")
@@ -472,7 +597,7 @@ def metadata():
 
 @app.route("/slack/search", methods=["POST"])
 def slack_search():
-    """API endpoint for searching across Jira, Slack, and Confluence with MCP enhancement"""
+    """API endpoint for searching across Jira, Slack, and Confluence with conditional MCP/API search"""
     
     try:
         data = request.get_json()
@@ -486,10 +611,18 @@ def slack_search():
         query = data['query']
         channel = data.get('channel', 'general')
         
-        logger.info(f"API search request: {query}")
+        # Check if MCP search is enabled via environment variable
+        is_mcp_enabled = os.getenv('IS_MCP_SEARCH_ENABLED', 'true').lower() == 'true'
+        
+        logger.info(f"API search request: {query} (MCP enabled: {is_mcp_enabled})")
 
-        # Use the MCP-enhanced perform_search function
-        result = perform_search(query, channel)
+        # Conditionally use MCP or API search based on environment variable
+        if is_mcp_enabled and MCP_AVAILABLE and MCP_SERVERS_READY:
+            logger.info("🚀 Using MCP enhanced search")
+            result = perform_search_mcp_fallback(query, channel)
+        else:
+            logger.info("🔍 Using direct API search")
+            result = perform_search(query, channel)
         
         if result.get('success'):
             # Generate solution recommendations using MCP enhanced search agent with direct API fallback
@@ -976,6 +1109,32 @@ def bot_status():
         
     except Exception as e:
         logger.error(f"Error checking bot status: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route("/search/config", methods=["GET"])
+def search_config():
+    """API endpoint to check current search configuration"""
+    try:
+        is_mcp_enabled = os.getenv('IS_MCP_SEARCH_ENABLED', 'true').lower() == 'true'
+        
+        return jsonify({
+            'success': True,
+            'search_configuration': {
+                'is_mcp_search_enabled': is_mcp_enabled,
+                'mcp_available': MCP_AVAILABLE,
+                'mcp_servers_ready': MCP_SERVERS_READY,
+                'current_search_method': 'MCP Enhanced Search' if (is_mcp_enabled and MCP_AVAILABLE and MCP_SERVERS_READY) else 'Direct API Search',
+                'environment_variable': os.getenv('IS_MCP_SEARCH_ENABLED', 'true'),
+                'enabled_servers': list(mcp_config.get_enabled_servers().keys()) if MCP_AVAILABLE else []
+            },
+            'message': f"Search method: {'MCP Enhanced' if (is_mcp_enabled and MCP_AVAILABLE and MCP_SERVERS_READY) else 'Direct API'}"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking search config: {e}")
         return jsonify({
             'success': False,
             'error': str(e)
