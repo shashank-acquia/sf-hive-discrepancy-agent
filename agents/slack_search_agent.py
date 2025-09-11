@@ -1,7 +1,9 @@
+import json
 import os
 import re
 import logging
 from typing import Dict, List, Optional
+from datetime import datetime, timezone
 try:
     from langchain_openai import ChatOpenAI
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -15,17 +17,83 @@ except ImportError:
         HumanMessage = None
         SystemMessage = None
 
+
+from sentence_transformers import SentenceTransformer, util
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+
 from tools.cdp_chat_tool.slack_tool import SlackTool
 from tools.cdp_chat_tool.jira_tool import JiraTool
 from tools.cdp_chat_tool.confluence_tool import ConfluenceTool
 
 logger = logging.getLogger(__name__)
 
+
+class AdvancedRelevanceCalculator:
+
+    def __init__(self, model_name='all-MiniLM-L6-v2'):
+        try:
+            self.model = SentenceTransformer(model_name)
+            logger.info(f"SentenceTransformer model '{model_name}' loaded successfully.")
+        except Exception as e:
+            logger.error(f"Failed to load SentenceTransformer model: {e}")
+            self.model = None
+
+    def calculate_score(self, ticket: Dict, query: str, keywords: List[str]) -> float:
+        if not self.model:
+            return 0.0
+
+        ticket_text = f"{ticket.get('summary', '')}. {ticket.get('description', '')[:500]}"
+        query_embedding = self.model.encode(query, convert_to_tensor=True)
+        ticket_embedding = self.model.encode(ticket_text, convert_to_tensor=True)
+        semantic_score = util.pytorch_cos_sim(query_embedding, ticket_embedding).item()
+
+        summary_lower = ticket.get('summary', '').lower()
+        description_lower = (ticket.get('description', '') or '').lower()
+
+        summary_matches = sum(1 for kw in keywords if kw.lower() in summary_lower)
+        description_matches = sum(1 for kw in keywords if kw.lower() in description_lower)
+
+        keyword_score = (2 * summary_matches + description_matches) / (
+                    2 * len(keywords) + len(keywords)) if keywords else 0
+
+        status_weight = {
+            'closed': 1.0, 'resolved': 1.0, 'done': 1.0,
+            'in progress': 0.6, 'in review': 0.6,
+            'open': 0.3, 'to do': 0.3, 'backlog': 0.1
+        }.get(ticket.get('status', '').lower(), 0.2)
+
+        recency_score = 0.0
+        try:
+            updated_str = ticket.get('updated', '').split('.')[0]
+            updated_date = datetime.fromisoformat(updated_str).replace(tzinfo=timezone.utc)
+            days_since_update = (datetime.now(timezone.utc) - updated_date).days
+            recency_score = max(0, 1 - (days_since_update / 730))
+        except (ValueError, TypeError):
+            recency_score = 0.3
+
+        metadata_score = (status_weight + recency_score) / 2
+
+        final_score = (
+                (semantic_score * 0.5) +
+                (keyword_score * 0.3) +
+                (metadata_score * 0.2)
+        )
+
+        return round(final_score * 100, 2)
+
 class SlackSearchAgent:
     def __init__(self):
         self.slack_tool = SlackTool()
         self.jira_tool = JiraTool()
         self.confluence_tool = ConfluenceTool()
+
+        self.relevance_calculator = AdvancedRelevanceCalculator()
+        try:
+            self.nltk_stopwords = set(stopwords.words('english'))
+        except Exception:
+            self.nltk_stopwords = set()
         
         # Initialize LLM
         if ChatOpenAI is not None:
@@ -46,6 +114,49 @@ class SlackSearchAgent:
         self.search_channels = os.getenv('SLACK_SEARCH_CHANNELS', '').split(',')
         self.confluence_spaces = os.getenv('CONFLUENCE_SPACES', '').split(',')
         self.jira_projects = os.getenv('JIRA_PROJECTS', '').split(',')
+
+    def _extract_keywords_with_llm(self, query: str) -> List[str]:
+        """
+        Uses an LLM to extract key technical terms. This version is robust against
+        imperfect JSON responses from the LLM.
+        """
+        if not self.llm:
+            logger.warning("LLM not available. Falling back to simple keyword extraction.")
+            tokens = word_tokenize(query.lower())
+            return [word for word in tokens if word.isalpha() and word not in self.nltk_stopwords]
+
+        prompt = f"""
+        Analyze the user query to identify critical technical keywords for a search.
+        Focus on error messages, product names, technologies, and specific concepts.
+        Exclude generic words like 'issue', 'problem', 'error'.
+        Your response MUST be ONLY a single JSON array of strings and nothing else.
+
+        Query: "{query}"
+        """
+
+        try:
+            messages = [
+                SystemMessage(
+                    content="You are an API that returns JSON. You only respond with a JSON array of technical keywords."),
+                HumanMessage(content=prompt)
+            ]
+            response = self.llm.invoke(messages)
+            response_content = response.content
+
+            json_match = re.search(r'\[.*\]', response_content, re.DOTALL)
+
+            if not json_match:
+                logger.error(f"LLM did not return a parsable JSON array. Response: '{response_content}'")
+                raise ValueError("No JSON array found in LLM response")
+
+            extracted_json = json.loads(json_match.group(0))
+            logger.info(f"LLM extracted keywords: {extracted_json}")
+            return [str(item) for item in extracted_json]
+
+        except Exception as e:
+            logger.error(f"LLM keyword extraction failed: {e}. Falling back to simple NLTK method.")
+            tokens = word_tokenize(query.lower())
+            return [word for word in tokens if word.isalpha() and word not in self.nltk_stopwords and len(word) > 2]
         
     def process_slack_message(self, message: str, channel: str, user: str, thread_ts: Optional[str] = None) -> Dict:
         """Process a Slack message and generate a comprehensive response"""
@@ -79,19 +190,23 @@ class SlackSearchAgent:
                 'success': False,
                 'error': str(e)
             }
-    
+
     def _search_all_platforms(self, query: str) -> Dict:
-        """Enhanced search across Jira, Slack, and Confluence with thread workaround"""
+        """
+        A streamlined search process using advanced keyword extraction and relevance ranking.
+        """
         results = {
             'jira_issues': [],
             'slack_messages': [],
-            'confluence_pages': [],
-            'search_strategies': []
+            'confluence_pages': []
         }
-        
-        # Search Slack channels first
+
+        keywords = self._extract_keywords_with_llm(query)
+        search_query_for_jira = " ".join(keywords) if keywords else query
+
+        # 1. Search Slack
         try:
-            if self.search_channels and self.search_channels[0]:  # Check if channels are configured
+            if self.search_channels and self.search_channels[0]:
                 slack_results = self.slack_tool.search_in_channels(
                     query=query,
                     channels=[ch.strip() for ch in self.search_channels if ch.strip()],
@@ -99,51 +214,67 @@ class SlackSearchAgent:
                 )
                 results['slack_messages'] = slack_results
                 logger.info(f"Found {len(slack_results)} relevant Slack messages")
-                
-                # Enhanced JIRA search based on Slack message content
-                enhanced_jira_results = self._enhanced_jira_search_from_slack(query, slack_results)
-                results['jira_issues'].extend(enhanced_jira_results)
-                
         except Exception as e:
             logger.error(f"Error searching Slack: {e}")
-        
-        # Direct JIRA search
+
+        # 2. Search and Rank Jira
         try:
-            direct_jira_results = self.jira_tool.get_similar_issues(query, max_results=5)
-            for ticket in direct_jira_results:
-                ticket['search_strategy'] = 'direct_query'
-                ticket['relevance_score'] = ticket.get('similarity_score', 0) * 100
-            results['jira_issues'].extend(direct_jira_results)
-            logger.info(f"Found {len(direct_jira_results)} similar Jira issues via direct search")
+            jira_candidates = self.jira_tool.search_issues(search_query_for_jira, max_results=25)
+            scored_tickets = [
+                {**t, 'relevance_score': self.relevance_calculator.calculate_score(t, query, keywords)}
+                for t in jira_candidates
+            ]
+            sorted_tickets = sorted(scored_tickets, key=lambda x: x.get('relevance_score', 0), reverse=True)
+            initial_top_tickets = sorted_tickets[:10]
+            logger.info("Initial search completed.")
         except Exception as e:
-            logger.error(f"Error searching Jira: {e}")
-        
-        # Deduplicate and sort JIRA results by relevance
-        unique_tickets = {}
-        for ticket in results['jira_issues']:
-            key = ticket.get('key')
-            if key:
-                if key not in unique_tickets or ticket.get('relevance_score', 0) > unique_tickets[key].get('relevance_score', 0):
-                    unique_tickets[key] = ticket
-        
-        sorted_tickets = sorted(unique_tickets.values(), key=lambda x: x.get('relevance_score', 0), reverse=True)
-        results['jira_issues'] = sorted_tickets[:10]  # Top 10 results
-        
-        # Search Confluence (optional - gracefully handle if not available)
+            logger.error(f"Initial Jira search failed: {e}")
+            initial_top_tickets = []
+
+        final_jira_results = initial_top_tickets
+        if initial_top_tickets and initial_top_tickets[0].get('relevance_score', 0) > 75:
+            top_ticket = initial_top_tickets[0]
+            logger.info(f"High confidence match found: {top_ticket['key']}. Refining search...")
+
+            top_ticket_summary = top_ticket.get('summary', '')
+            new_keywords = [word for word in word_tokenize(top_ticket_summary.lower())
+                            if word.isalpha() and word not in self.nltk_stopwords and len(word) > 3]
+
+            combined_keywords = list(set(keywords + new_keywords))
+            refined_query = " ".join(combined_keywords)
+
+            try:
+                logger.info(f"Refined JQL query with terms: {refined_query}")
+                refined_candidates = self.jira_tool.search_issues(refined_query, max_results=15)
+
+                refined_scored = [
+                    {**t, 'relevance_score': self.relevance_calculator.calculate_score(t, query, combined_keywords)}
+                    for t in refined_candidates
+                ]
+
+                combined_tickets = {ticket['key']: ticket for ticket in initial_top_tickets}
+                for ticket in refined_scored:
+                    combined_tickets[ticket['key']] = ticket
+
+                final_jira_results = sorted(combined_tickets.values(), key=lambda x: x.get('relevance_score', 0),
+                                            reverse=True)[:10]
+                logger.info("Search refined and results re-ranked.")
+
+            except Exception as e:
+                logger.error(f"Refined Jira search failed: {e}")
+
+        results['jira_issues'] = final_jira_results
+
+        # 3. Search Confluence
         try:
-            if os.getenv('CONFLUENCE_SERVER') and os.getenv('CONFLUENCE_API_TOKEN'):
+            if os.getenv('CONFLUENCE_SERVER'):
                 confluence_results = self.confluence_tool.search_similar_content(query, limit=5)
                 results['confluence_pages'] = confluence_results
                 logger.info(f"Found {len(confluence_results)} relevant Confluence pages")
-            else:
-                logger.info("Confluence not configured - skipping Confluence search")
         except Exception as e:
-            logger.warning(f"Confluence search unavailable (user may not have access): {e}")
-            # Continue without Confluence - this is not a critical error
-        
-        # Generate platform insights
+            logger.warning(f"Confluence search failed: {e}")
+
         results['platform_insights'] = self._generate_platform_insights(results)
-        
         return results
     
     def _generate_platform_insights(self, search_results: Dict) -> Dict:
@@ -395,7 +526,7 @@ class SlackSearchAgent:
             
             # Prepare context for LLM
             context = self._prepare_context(search_results)
-            
+
             system_prompt = """You are a helpful assistant that analyzes user queries and provides comprehensive responses based on search results from Jira, Slack, and Confluence.
 
 Your task is to:
@@ -422,10 +553,10 @@ Please provide a comprehensive response that helps the user with their query. In
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
-            
+
             response = self.llm(messages)
             return response.content
-            
+
         except Exception as e:
             logger.error(f"Error generating LLM response: {e}")
             return self._generate_fallback_response(search_results)
@@ -436,15 +567,22 @@ Please provide a comprehensive response that helps the user with their query. In
         
         # Jira Issues
         if search_results['jira_issues']:
-            context_parts.append("JIRA ISSUES:")
-            for issue in search_results['jira_issues'][:5]:  # Top 3 results
-                context_parts.append(f"- {issue['key']}: {issue['summary']}")
-                context_parts.append(f"  Status: {issue['status']}, Priority: {issue['priority']}")
-                context_parts.append(f"  URL: {issue['url']}")
-                if issue.get('description'):
-                    context_parts.append(f"  Description: {issue['description'][:200]}...")
-                context_parts.append("")
-        
+            context_parts.append("JIRA ISSUES (sorted by relevance):")
+            for issue in search_results['jira_issues'][:5]:
+                score = issue.get('relevance_score', 0)
+                context_parts.append(f"- {issue['key']}: {issue['summary']} (Relevance: {score:.1f}%)")
+                context_parts.append(f"  Status: {issue['status']}, URL: {issue['url']}")
+
+                if 'full_details' in issue and issue['full_details'].get('comments'):
+                    context_parts.append("  - Relevant Comments:")
+                    # Get the last 3 comments, as solutions are often at the end
+                    for comment in issue['full_details']['comments'][-3:]:
+                        author = comment.get('author', 'Unknown')
+                        body = comment.get('body', '').strip()
+                        # Sanitize and truncate comment for brevity
+                        clean_body = re.sub(r'\{code:.*?\}', '', body, flags=re.DOTALL)
+                        context_parts.append(f"    - From {author}: \"{clean_body[:400]}...\"")
+
         # Slack Messages
         if search_results['slack_messages']:
             context_parts.append("SLACK MESSAGES:")

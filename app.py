@@ -10,6 +10,8 @@ import re
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+from tools.utils import download_nltk_data
+
 # Import MCP integration
 try:
     from mcp_integration.flask_integration import register_mcp_routes, enhance_existing_search_results
@@ -26,6 +28,7 @@ except ImportError as e:
     MCP_SERVERS_READY = False
 
 load_dotenv()
+download_nltk_data()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -427,15 +430,29 @@ def perform_search_mcp_fallback(query, channel=None):
         }
 
 @slack_app.event("app_mention")
-def handle_app_mention(event, say, logger):
+def handle_app_mention(event, say, client, logger):
     """Handle when the bot is mentioned"""
     try:
         user = event['user']
         channel = event['channel']
         text = event['text']
-        thread_ts = event.get('ts')  # Use the message timestamp as thread_ts for replies
+        thread_ts = event.get('thread_ts') or event.get('ts')
         
         logger.info(f"🎯 Bot mentioned by {user} in {channel}: {text}")
+
+        # Fetch Thread Context
+        full_query_text = text
+        if event.get('thread_ts'):
+            try:
+                logger.info(f"Mention is in a thread. Fetching context from thread {thread_ts}...")
+                replies = client.conversations_replies(channel=channel, ts=event.get('thread_ts'), limit=10)
+                # Combine messages, oldest to newest, to form a coherent story
+                thread_messages = [msg['text'] for msg in replies['messages']]
+                full_query_text = "\n".join(thread_messages)
+                logger.info(f"Full context query:\n{full_query_text}")
+            except Exception as e:
+                logger.error(f"Failed to fetch thread context: {e}")
+                full_query_text = text
         
         # Remove the bot mention from the text
         clean_text = re.sub(r'<@[A-Z0-9]+>', '', text).strip()
