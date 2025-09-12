@@ -150,6 +150,8 @@ class JiraTool:
                     hasattr(link.type, 'name') and (hasattr(link, 'outwardIssue') or hasattr(link, 'inwardIssue'))
                 ]
             }
+
+            print(f'[INFO] Formatted issue data: {issue_data}')
             return issue_data
         except Exception as field_error:
             print(f"[WARNING] Error processing issue {issue.key}: {field_error}")

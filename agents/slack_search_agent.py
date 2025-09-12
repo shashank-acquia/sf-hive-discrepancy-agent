@@ -260,7 +260,7 @@ class SlackSearchAgent:
             print(f"[WARNING] Confluence search failed: {e}")
 
         # Step 3: Multi-stage Jira Search and Refinement
-        final_jira_results = []
+        final_jira_results_with_details = []
         try:
             # Initial broad search
             jira_candidates = self.jira_tool.search_issues(
@@ -323,19 +323,40 @@ class SlackSearchAgent:
 
             # Final Ranking: Sort all collected tickets and take the top 10
             print(f"[DEBUG] Final combined pool has {len(combined_tickets)} unique tickets before re-ranking.")
-            final_jira_results = sorted(
+            final_ranked_tickets = sorted(
                 combined_tickets.values(),
                 key=lambda x: x.get('relevance_score', 0),
                 reverse=True
-            )[:10]
+            )[:7]
+
+            print(f"[INFO] Fetching full details for the top {len(final_ranked_tickets)} Jira tickets...")
+            for ticket in final_ranked_tickets:
+                try:
+                    # This call fetches comments, attachments, etc.
+                    details = self.jira_tool.get_issue_details(ticket['key'])
+                    if details:
+                        # Merge the detailed info into our existing ticket dictionary
+                        ticket_with_details = {**ticket, 'full_details': details}
+                        final_jira_results_with_details.append(ticket_with_details)
+                        comment_count = len(details.get('comments', []))
+                        print(
+                            f"[DEBUG] Successfully fetched details for {ticket['key']} ({comment_count} comments found).")
+                    else:
+                        # If details fail, append the original ticket summary
+                        final_jira_results_with_details.append(ticket)
+                except Exception as e:
+                    print(f"[ERROR] Failed to fetch details for {ticket['key']}: {e}")
+                    final_jira_results_with_details.append(ticket)
 
         except Exception as e:
             print(f"[ERROR] Jira search process failed: {e}")
             import traceback
             traceback.print_exc()
 
-        results['jira_issues'] = final_jira_results
+        results['jira_issues'] = final_jira_results_with_details
         results['platform_insights'] = self._generate_platform_insights(results)
+
+        print("Final jira_issues with details: "+str(results['jira_issues']))
         return results
 
     def _generate_platform_insights(self, search_results: Dict) -> Dict:
