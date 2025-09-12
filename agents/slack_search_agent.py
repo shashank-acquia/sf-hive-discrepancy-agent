@@ -157,6 +157,33 @@ class SlackSearchAgent:
             logger.error(f"LLM keyword extraction failed: {e}. Falling back to simple NLTK method.")
             tokens = word_tokenize(query.lower())
             return [word for word in tokens if word.isalpha() and word not in self.nltk_stopwords and len(word) > 2]
+
+    def _extract_entity_ids(self, keywords: List[str]) -> Dict[str, List[str]]:
+        """
+        Parses a list of keywords to identify and extract specific entity IDs.
+        Currently supports Jira IDs.
+        """
+        ids = {
+            "jira_ids": [],
+            "slack_ids": [],
+            "confluence_ids": [],
+            "remaining_keywords": []
+        }
+        # Regex for standard Jira keys (e.g., PROJ-123, A1DEV-12345)
+        jira_pattern = re.compile(r'\b[A-Z0-9]{2,10}-\d+\b', re.IGNORECASE)
+
+        for kw in keywords:
+            # Check for Jira IDs
+            if jira_pattern.fullmatch(kw):  # Use fullmatch to ensure the whole keyword is a Jira ID
+                ids["jira_ids"].append(kw.upper())
+            else:
+                # Add other ID patterns here for Slack, Confluence if needed in the future
+                ids["remaining_keywords"].append(kw)
+
+        if ids["jira_ids"]:
+            print(f"[DEBUG] Identified Jira IDs from keywords: {ids['jira_ids']}")
+
+        return ids
         
     def process_slack_message(self, message: str, channel: str, user: str, thread_ts: Optional[str] = None) -> Dict:
         """Process a Slack message and generate a comprehensive response"""
@@ -195,16 +222,25 @@ class SlackSearchAgent:
         """
         A streamlined search process using advanced keyword extraction and relevance ranking.
         """
+        print(f"[DEBUG] Starting unified search for query: '{query[:100]}...'")
         results = {
             'jira_issues': [],
             'slack_messages': [],
             'confluence_pages': []
         }
 
+        # Step 1: Keyword and Entity ID extraction
         keywords = self._extract_keywords_with_llm(query)
-        search_query_for_jira = " ".join(keywords) if keywords else query
+        print(f"[DEBUG] Extracted keywords via LLM: {keywords}")
 
-        # 1. Search Slack
+        entity_ids = self._extract_entity_ids(keywords)
+        jira_ids_found = entity_ids['jira_ids']
+        remaining_keywords = entity_ids['remaining_keywords']
+
+        search_query_for_tools = " ".join(keywords) if keywords else query
+        print("Extracted Keywords:", keywords)
+
+        # Step 2: Search Slack
         try:
             if self.search_channels and self.search_channels[0]:
                 slack_results = self.slack_tool.search_in_channels(
@@ -213,13 +249,14 @@ class SlackSearchAgent:
                     limit=10
                 )
                 results['slack_messages'] = slack_results
-                logger.info(f"Found {len(slack_results)} relevant Slack messages")
+                print(f"[INFO] Found {len(slack_results)} relevant Slack messages")
         except Exception as e:
-            logger.error(f"Error searching Slack: {e}")
+            print(f"[ERROR] Error searching Slack: {e}")
 
         # 2. Search and Rank Jira
         try:
-            jira_candidates = self.jira_tool.search_issues(search_query_for_jira, max_results=25)
+            print(f"[DEBUG] Searching Jira with text query: '{search_query_for_tools}' and specific IDs: {jira_ids_found}")
+            jira_candidates = self.jira_tool.search_issues(search_query_for_tools, jira_ids=jira_ids_found, max_results=25)
             scored_tickets = [
                 {**t, 'relevance_score': self.relevance_calculator.calculate_score(t, query, keywords)}
                 for t in jira_candidates
