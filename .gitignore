@@ -1,5 +1,54 @@
+# Python
 __pycache__/
+*.py[cod]
+*.pyo
+*.pyd
 *.pyc
-.env
-.git
-.idea/
+*.pdb
+*.egg
+*.eggs
+*.env
+*.venv
+.env/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Docker
+*.db
+*.sqlite3
+docker-compose.override.yml
+
+# System files
+Thumbs.db
+
+# Test output
+htmlcov/
+.coverage
+.tox/
+
+# Node
+node_modules/
+
+# Misc
+*.bak
+*.swp
+*.swo
+
+# Ignore resources and examples output
+resources/*/*.docx
+resources/*/*.csv
+examples/*.log
