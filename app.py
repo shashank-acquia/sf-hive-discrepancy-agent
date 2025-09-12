@@ -107,10 +107,11 @@ def perform_search(query, channel=None):
                     'project': issue.get('project'),
                     'issue_type': issue.get('issue_type'),
                     'relevance_score': issue.get('relevance_score', 0),
-                    'search_strategy': issue.get('search_strategy', 'direct_query')
+                    'search_strategy': issue.get('search_strategy', 'direct_query'),
+                    'components': issue.get('components', []),
+                    'labels': issue.get('labels', [])
                 }
             })
-        
         for page in search_results.get('confluence_pages', []):
             formatted_results['results'].append({
                 'platform': 'confluence',
@@ -275,7 +276,7 @@ def perform_search_mcp_fallback(query, channel=None):
                                 'score': msg.get('score', 0)
                             }
                         })
-                    
+
                     for issue in search_results.get('jira_issues', []):
                         formatted_results['results'].append({
                             'platform': 'jira',
@@ -290,7 +291,9 @@ def perform_search_mcp_fallback(query, channel=None):
                                 'project': issue.get('project'),
                                 'issue_type': issue.get('issue_type'),
                                 'relevance_score': issue.get('relevance_score', 0),
-                                'search_strategy': issue.get('search_strategy', 'mcp_enhanced')
+                                'search_strategy': issue.get('search_strategy', 'direct_query'),
+                                'components': issue.get('components', []),
+                                'labels': issue.get('labels', [])
                             }
                         })
                     
@@ -380,7 +383,9 @@ def perform_search_mcp_fallback(query, channel=None):
                     'project': issue.get('project'),
                     'issue_type': issue.get('issue_type'),
                     'relevance_score': issue.get('relevance_score', 0),
-                    'search_strategy': issue.get('search_strategy', 'direct_query')
+                    'search_strategy': issue.get('search_strategy', 'direct_query'),
+                    'components': issue.get('components', []),
+                    'labels': issue.get('labels', [])
                 }
             })
         

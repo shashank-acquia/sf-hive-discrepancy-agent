@@ -220,9 +220,10 @@ class SlackSearchAgent:
 
     def _search_all_platforms(self, query: str) -> Dict:
         """
-        A streamlined search process using advanced keyword extraction and relevance ranking.
+        An enhanced search process using keyword extraction, relevance ranking,
+        and analysis of related Jira tickets (components, labels, linked issues).
         """
-        print(f"[DEBUG] Starting unified search for query: '{query[:100]}...'")
+        print(f"[DEBUG] Starting ENHANCED unified search for query: '{query[:100]}...'")
         results = {
             'jira_issues': [],
             'slack_messages': [],
@@ -231,16 +232,13 @@ class SlackSearchAgent:
 
         # Step 1: Keyword and Entity ID extraction
         keywords = self._extract_keywords_with_llm(query)
-        print(f"[DEBUG] Extracted keywords via LLM: {keywords}")
-
         entity_ids = self._extract_entity_ids(keywords)
         jira_ids_found = entity_ids['jira_ids']
         remaining_keywords = entity_ids['remaining_keywords']
+        search_query_for_tools = " ".join(remaining_keywords) if remaining_keywords else query
+        print(f"[DEBUG] Extracted Keywords: {keywords}, Jira IDs: {jira_ids_found}")
 
-        search_query_for_tools = " ".join(keywords) if keywords else query
-        print("Extracted Keywords:", keywords)
-
-        # Step 2: Search Slack
+        # Step 2: Search Slack & Confluence (these are independent)
         try:
             if self.search_channels and self.search_channels[0]:
                 slack_results = self.slack_tool.search_in_channels(
@@ -253,67 +251,93 @@ class SlackSearchAgent:
         except Exception as e:
             print(f"[ERROR] Error searching Slack: {e}")
 
-        # 2. Search and Rank Jira
         try:
-            print(f"[DEBUG] Searching Jira with text query: '{search_query_for_tools}' and specific IDs: {jira_ids_found}")
-            jira_candidates = self.jira_tool.search_issues(search_query_for_tools, jira_ids=jira_ids_found, max_results=25)
+            if os.getenv('CONFLUENCE_SERVER'):
+                confluence_results = self.confluence_tool.search_similar_content(query, limit=5)
+                results['confluence_pages'] = confluence_results
+                print(f"[INFO] Found {len(confluence_results)} relevant Confluence pages")
+        except Exception as e:
+            print(f"[WARNING] Confluence search failed: {e}")
+
+        # Step 3: Multi-stage Jira Search and Refinement
+        final_jira_results = []
+        try:
+            # Initial broad search
+            jira_candidates = self.jira_tool.search_issues(
+                search_query_for_tools,
+                jira_ids=jira_ids_found,
+                max_results=25
+            )
             scored_tickets = [
                 {**t, 'relevance_score': self.relevance_calculator.calculate_score(t, query, keywords)}
                 for t in jira_candidates
             ]
             sorted_tickets = sorted(scored_tickets, key=lambda x: x.get('relevance_score', 0), reverse=True)
             initial_top_tickets = sorted_tickets[:10]
-            logger.info("Initial search completed.")
-        except Exception as e:
-            logger.error(f"Initial Jira search failed: {e}")
-            initial_top_tickets = []
+            print(f"[INFO] Initial Jira search found {len(initial_top_tickets)} top candidates.")
 
-        final_jira_results = initial_top_tickets
-        if initial_top_tickets and initial_top_tickets[0].get('relevance_score', 0) > 75:
-            top_ticket = initial_top_tickets[0]
-            logger.info(f"High confidence match found: {top_ticket['key']}. Refining search...")
+            # --- NEW REFINEMENT LOGIC ---
+            combined_tickets = {ticket['key']: ticket for ticket in initial_top_tickets}
 
-            top_ticket_summary = top_ticket.get('summary', '')
-            new_keywords = [word for word in word_tokenize(top_ticket_summary.lower())
-                            if word.isalpha() and word not in self.nltk_stopwords and len(word) > 3]
+            if initial_top_tickets and initial_top_tickets[0].get('relevance_score', 0) > 65:
+                top_ticket = initial_top_tickets[0]
+                print(
+                    f"[INFO] High confidence match found: {top_ticket['key']} (Score: {top_ticket['relevance_score']}). Refining search...")
 
-            combined_keywords = list(set(keywords + new_keywords))
-            refined_query = " ".join(combined_keywords)
+                # Refinement Strategy 1: Use components and labels for a new text search
+                components_from_ticket = top_ticket.get('components', [])
+                labels_from_ticket = top_ticket.get('labels', [])
 
-            try:
-                logger.info(f"Refined JQL query with terms: {refined_query}")
+                # Combine original keywords with new structured data
+                refined_keywords = list(set(
+                    keywords +
+                    [c.lower() for c in components_from_ticket] +
+                    [l.lower() for l in labels_from_ticket]
+                ))
+                refined_query = " ".join(refined_keywords)
+
+                print(f"[DEBUG] Refined JQL query with terms: {refined_query}")
                 refined_candidates = self.jira_tool.search_issues(refined_query, max_results=15)
 
+                # Score and add refined results to our pool
                 refined_scored = [
-                    {**t, 'relevance_score': self.relevance_calculator.calculate_score(t, query, combined_keywords)}
+                    {**t, 'relevance_score': self.relevance_calculator.calculate_score(t, query, refined_keywords)}
                     for t in refined_candidates
                 ]
-
-                combined_tickets = {ticket['key']: ticket for ticket in initial_top_tickets}
                 for ticket in refined_scored:
                     combined_tickets[ticket['key']] = ticket
+                print(f"[INFO] Refined search added {len(refined_scored)} more candidates.")
 
-                final_jira_results = sorted(combined_tickets.values(), key=lambda x: x.get('relevance_score', 0),
-                                            reverse=True)[:10]
-                logger.info("Search refined and results re-ranked.")
+                # Refinement Strategy 2: Fetch directly linked issues
+                linked_issues = self.jira_tool.get_linked_issues(top_ticket['key'])
+                if linked_issues:
+                    print(f"[INFO] Found {len(linked_issues)} linked issues for {top_ticket['key']}. Adding to pool.")
+                    # Score and add linked issues, giving them a relevance boost
+                    linked_scored = [
+                        {**t, 'relevance_score': self.relevance_calculator.calculate_score(t, query, keywords) + 10}
+                        # Add a bonus for being linked
+                        for t in linked_issues
+                    ]
+                    for ticket in linked_scored:
+                        combined_tickets[ticket['key']] = ticket
 
-            except Exception as e:
-                logger.error(f"Refined Jira search failed: {e}")
+            # Final Ranking: Sort all collected tickets and take the top 10
+            print(f"[DEBUG] Final combined pool has {len(combined_tickets)} unique tickets before re-ranking.")
+            final_jira_results = sorted(
+                combined_tickets.values(),
+                key=lambda x: x.get('relevance_score', 0),
+                reverse=True
+            )[:10]
+
+        except Exception as e:
+            print(f"[ERROR] Jira search process failed: {e}")
+            import traceback
+            traceback.print_exc()
 
         results['jira_issues'] = final_jira_results
-
-        # 3. Search Confluence
-        try:
-            if os.getenv('CONFLUENCE_SERVER'):
-                confluence_results = self.confluence_tool.search_similar_content(query, limit=5)
-                results['confluence_pages'] = confluence_results
-                logger.info(f"Found {len(confluence_results)} relevant Confluence pages")
-        except Exception as e:
-            logger.warning(f"Confluence search failed: {e}")
-
         results['platform_insights'] = self._generate_platform_insights(results)
         return results
-    
+
     def _generate_platform_insights(self, search_results: Dict) -> Dict:
         """Generate platform-specific insights based on search results"""
         insights = {}

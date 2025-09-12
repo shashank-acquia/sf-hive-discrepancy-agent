@@ -108,39 +108,89 @@ class JiraTool:
             print(f"[DEBUG] Executing final JQL query: {jql_query}")
             issues = self.jira.search_issues(jql_query, maxResults=max_results, expand='changelog')
 
-            results = []
-            for issue in issues:
-                self._print_issue_fields(issue)
-                try:
-                    issue_data = {
-                        'key': issue.key,
-                        'summary': getattr(issue.fields, 'summary', 'No summary'),
-                        'description': getattr(issue.fields, 'description', '') or '',
-                        'status': getattr(issue.fields.status, 'name', 'Unknown') if hasattr(issue.fields,
-                                                                                             'status') and issue.fields.status else 'Unknown',
-                        'priority': self._safe_get_priority(issue),
-                        'assignee': getattr(issue.fields.assignee, 'displayName', 'Unassigned') if hasattr(issue.fields,
-                                                                                                           'assignee') and issue.fields.assignee else 'Unassigned',
-                        'reporter': getattr(issue.fields.reporter, 'displayName', 'Unknown') if hasattr(issue.fields,
-                                                                                                        'reporter') and issue.fields.reporter else 'Unknown',
-                        'created': str(getattr(issue.fields, 'created', 'Unknown')),
-                        'updated': str(getattr(issue.fields, 'updated', 'Unknown')),
-                        'url': f"{self.server}/browse/{issue.key}",
-                        'project': getattr(issue.fields.project, 'name', 'Unknown') if hasattr(issue.fields,
-                                                                                               'project') and issue.fields.project else 'Unknown',
-                        'issue_type': getattr(issue.fields.issuetype, 'name', 'Unknown') if hasattr(issue.fields,
-                                                                                                    'issuetype') and issue.fields.issuetype else 'Unknown'
-                    }
-                    print(f"[DEBUG] Issue Data is : {issue_data}")
-                    results.append(issue_data)
-                except Exception as field_error:
-                    print(f"[WARNING] Error processing issue {issue.key}: {field_error}")
-                    results.append({'key': issue.key, 'summary': 'Error loading details',
-                                    'url': f"{self.server}/browse/{issue.key}"})
+            print(f"[INFO] JIRA API returned {len(issues)} issues.")
 
+            results = [self._format_issue(issue) for issue in issues]
             return results
         except Exception as e:
             print(f"[ERROR] Error searching JIRA issues: {e}")
+            return []
+
+    def _format_issue(self, issue) -> Dict:
+        """Helper function to safely format a JIRA issue object into a dictionary."""
+        try:
+            issue_data = {
+                'key': issue.key,
+                'summary': getattr(issue.fields, 'summary', 'No summary'),
+                'description': getattr(issue.fields, 'description', '') or '',
+                'status': getattr(issue.fields.status, 'name', 'Unknown') if hasattr(issue.fields,
+                                                                                     'status') and issue.fields.status else 'Unknown',
+                'priority': self._safe_get_priority(issue),
+                'assignee': getattr(issue.fields.assignee, 'displayName', 'Unassigned') if hasattr(issue.fields,
+                                                                                                   'assignee') and issue.fields.assignee else 'Unassigned',
+                'reporter': getattr(issue.fields.reporter, 'displayName', 'Unknown') if hasattr(issue.fields,
+                                                                                                'reporter') and issue.fields.reporter else 'Unknown',
+                'created': str(getattr(issue.fields, 'created', 'Unknown')),
+                'updated': str(getattr(issue.fields, 'updated', 'Unknown')),
+                'url': f"{self.server}/browse/{issue.key}",
+                'project': getattr(issue.fields.project, 'name', 'Unknown') if hasattr(issue.fields,
+                                                                                       'project') and issue.fields.project else 'Unknown',
+                'issue_type': getattr(issue.fields.issuetype, 'name', 'Unknown') if hasattr(issue.fields,
+                                                                                            'issuetype') and issue.fields.issuetype else 'Unknown',
+                # --- NEW: Extracting additional rich fields ---
+                'components': [comp.name for comp in getattr(issue.fields, 'components', [])],
+                'labels': getattr(issue.fields, 'labels', []),
+                'issuelinks': [
+                    {
+                        'type': link.type.name,
+                        'direction': 'outward' if hasattr(link, 'outwardIssue') else 'inward',
+                        'linked_issue_key': getattr(link, 'outwardIssue', getattr(link, 'inwardIssue', None)).key
+                    }
+                    for link in getattr(issue.fields, 'issuelinks', []) if
+                    hasattr(link.type, 'name') and (hasattr(link, 'outwardIssue') or hasattr(link, 'inwardIssue'))
+                ]
+            }
+            return issue_data
+        except Exception as field_error:
+            print(f"[WARNING] Error processing issue {issue.key}: {field_error}")
+            return {'key': issue.key, 'summary': 'Error loading details', 'url': f"{self.server}/browse/{issue.key}"}
+
+    def get_linked_issues(self, issue_key: str) -> List[Dict]:
+        """
+        NEW: Fetches and returns full details for all issues linked to the given issue_key.
+        """
+        if not self.jira:
+            return []
+        try:
+            print(f"[DEBUG] Fetching linked issues for {issue_key}...")
+            # First, get the main issue to find its links
+            main_issue = self.jira.issue(issue_key, expand='issuelinks')
+            if not hasattr(main_issue.fields, 'issuelinks') or not main_issue.fields.issuelinks:
+                print(f"[DEBUG] No issue links found for {issue_key}.")
+                return []
+
+            linked_issue_keys = []
+            for link in main_issue.fields.issuelinks:
+                if hasattr(link, 'outwardIssue'):
+                    linked_issue_keys.append(link.outwardIssue.key)
+                elif hasattr(link, 'inwardIssue'):
+                    linked_issue_keys.append(link.inwardIssue.key)
+
+            if not linked_issue_keys:
+                return []
+
+            print(f"[INFO] Found {len(linked_issue_keys)} linked issue keys: {linked_issue_keys}")
+            # Now, fetch these issues in a single batch query
+            # We don't need to re-apply the project filter here, as linked issues can be in any project
+            jql_query = f'key in ({", ".join(linked_issue_keys)})'
+            linked_issues_result = self.jira.search_issues(jql_query, maxResults=len(linked_issue_keys))
+
+            # Format them using our standard helper
+            formatted_linked_issues = [self._format_issue(issue) for issue in linked_issues_result]
+            return formatted_linked_issues
+
+        except Exception as e:
+            print(f"[ERROR] Failed to get linked issues for {issue_key}: {e}")
             return []
 
     def _print_issue_fields(self, issue):
