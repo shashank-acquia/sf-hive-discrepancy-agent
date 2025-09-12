@@ -193,34 +193,26 @@ class JiraTool:
         return all_results[:max_results]
     
     def get_issue_details(self, issue_key: str) -> Dict:
-        """Get detailed information about a specific issue"""
+        """Get detailed information about a specific issue, including all comments (no duplicates, no pagination)."""
         if not self.jira:
             return {}
-        
         try:
-            issue = self.jira.issue(issue_key, expand='changelog,comments')
-            
-            # Get comments with safe field access
+            issue = self.jira.issue(issue_key, expand='changelog')
+            # Get all comments using jira.comments(issue_key)
             comments = []
             try:
-                if hasattr(issue.fields, 'comment') and issue.fields.comment and hasattr(issue.fields.comment, 'comments'):
-                    for comment in issue.fields.comment.comments:
-                        try:
-                            comments.append({
-                                'author': getattr(comment.author, 'displayName', 'Unknown') if hasattr(comment, 'author') and comment.author else 'Unknown',
-                                'body': getattr(comment, 'body', ''),
-                                'created': str(getattr(comment, 'created', 'Unknown'))
-                            })
-                        except Exception as comment_error:
-                            logger.warning(f"Error processing comment in issue {issue_key}: {comment_error}")
-                            comments.append({
-                                'author': 'Unknown',
-                                'body': 'Error loading comment',
-                                'created': 'Unknown'
-                            })
+                all_comments = self.jira.comments(issue_key)
+                logger.info(f"API returned {len(all_comments)} comments for issue {issue_key}")
+                for idx, comment in enumerate(all_comments):
+                    logger.debug(f"Comment {idx+1}: {getattr(comment, 'body', '')[:200]}")
+                    comments.append({
+                        'author': getattr(comment.author, 'displayName', 'Unknown') if hasattr(comment, 'author') and comment.author else 'Unknown',
+                        'body': getattr(comment, 'body', ''),
+                        'created': str(getattr(comment, 'created', 'Unknown'))
+                    })
+                logger.info(f"Processed {len(comments)} comments for issue {issue_key}")
             except Exception as comments_error:
-                logger.warning(f"Error accessing comments for issue {issue_key}: {comments_error}")
-            
+                logger.error(f"Error accessing comments for issue {issue_key}: {comments_error}")
             # Get attachments with safe field access
             attachments = []
             try:
@@ -242,8 +234,7 @@ class JiraTool:
                                 'url': ''
                             })
             except Exception as attachments_error:
-                logger.warning(f"Error accessing attachments for issue {issue_key}: {attachments_error}")
-            
+                logger.error(f"Error accessing attachments for issue {issue_key}: {attachments_error}")
             # Safe access to all issue fields with proper error handling
             return {
                 'key': issue.key,
@@ -263,6 +254,114 @@ class JiraTool:
             }
         except Exception as e:
             logger.error(f"Error getting issue details for {issue_key}: {e}")
+            return {}
+    
+    def _clean_text(self, text: str) -> str:
+        """Remove markdown/html-like formatting from text."""
+        # Remove {panel}, asterisks, underscores, h3./h4., and extra whitespace
+        text = re.sub(r'\{panel.*?\}', '', text)
+        text = re.sub(r'\*', '', text)
+        text = re.sub(r'_+', '', text)
+        text = re.sub(r'h3\. ', '', text)
+        text = re.sub(r'h4\. ', '', text)
+        text = re.sub(r'\|', '', text)
+        text = re.sub(r'\n+', '\n', text)
+        return text.strip()
+
+    def _parse_remediation_plan(self, remediation_text: str) -> Dict:
+        """Split remediation plan into Short Term, Medium Term, Long Term."""
+        plan = {}
+        short_match = re.search(r'Short Term\n(.*?)(Medium Term:|Long Term:|$)', remediation_text, re.DOTALL)
+        medium_match = re.search(r'Medium Term:\n(.*?)(Long Term:|$)', remediation_text, re.DOTALL)
+        long_match = re.search(r'Long Term:\n(.*)', remediation_text, re.DOTALL)
+        if short_match:
+            plan['Short Term'] = self._clean_text(short_match.group(1))
+        if medium_match:
+            plan['Medium Term'] = self._clean_text(medium_match.group(1))
+        if long_match:
+            plan['Long Term'] = self._clean_text(long_match.group(1))
+        return plan
+
+    def _parse_postmortem_description(self, description: str) -> Dict:
+        """Parse a postmortem description into selected structured sections and clean formatting."""
+        sections = [
+            ('Incident Summary', r'\*Incident Summary\*\n(.*?)----'),
+            ('Root Cause', r'\*Root Cause\*\n(.*?)----'),
+            ('Remediation Plan', r'\*Remediation Plan\*\n(.*?)----'),
+            ('Timeline', r'\*Timeline\*\n(.*?)----')
+        ]
+        parsed = {}
+        for name, pattern in sections:
+            match = re.search(pattern, description, re.DOTALL)
+            if match:
+                cleaned = self._clean_text(match.group(1))
+                if name == 'Remediation Plan':
+                    parsed[name] = self._parse_remediation_plan(cleaned)
+                else:
+                    parsed[name] = cleaned
+        return parsed
+    
+    def get_issue_with_links_and_comments(self, issue_key: str) -> Dict:
+        """Given a JIRA issue key, return its summary, description, all comments, and details of directly linked issues (A1DEV/AOPS only, filtered by type, no recursion)."""
+        if not self.jira:
+            return {}
+        try:
+            main_details = self.get_issue_details(issue_key)
+            main_comments = main_details.get('comments', [])  # All comments
+            linked_issues_details = []
+            try:
+                issue_obj = self.jira.issue(issue_key, expand='issuelinks')
+                if hasattr(issue_obj.fields, 'issuelinks') and issue_obj.fields.issuelinks:
+                    print(f"Found {len(issue_obj.fields.issuelinks)} linked issues for {issue_key}")
+                    all_linked = []
+                    for link in issue_obj.fields.issuelinks:
+                        linked_issue_key = None
+                        if hasattr(link, 'outwardIssue') and link.outwardIssue:
+                            linked_issue_key = getattr(link.outwardIssue, 'key', None)
+                        elif hasattr(link, 'inwardIssue') and link.inwardIssue:
+                            linked_issue_key = getattr(link.inwardIssue, 'key', None)
+                        if linked_issue_key:
+                            try:
+                                linked_issue_obj = self.jira.issue(linked_issue_key)
+                                linked_project_key = getattr(linked_issue_obj.fields.project, 'key', '') if hasattr(linked_issue_obj.fields, 'project') else ''
+                                linked_issue_type = getattr(linked_issue_obj.fields.issuetype, 'name', '') if hasattr(linked_issue_obj.fields, 'issuetype') else ''
+                                all_linked.append((linked_issue_key, linked_project_key, linked_issue_type))
+                                if linked_project_key in ['A1DEV', 'AOPS'] and linked_issue_type in ['Bug', 'Task', 'Story', 'Postmortem']:
+                                    linked_details = self.get_issue_details(linked_issue_key)
+                                    if linked_issue_type == 'Postmortem':
+                                        parsed_postmortem = self._parse_postmortem_description(linked_details.get('description', ''))
+                                        linked_issue_info = {
+                                            'key': linked_issue_key,
+                                            'project': linked_project_key,
+                                            'type': linked_issue_type,
+                                            'summary': linked_details.get('summary', ''),
+                                            'parsed_postmortem': parsed_postmortem
+                                        }
+                                    else:
+                                        linked_issue_info = {
+                                            'key': linked_issue_key,
+                                            'project': linked_project_key,
+                                            'type': linked_issue_type,
+                                            'summary': linked_details.get('summary', ''),
+                                            'description': linked_details.get('description', ''),
+                                            'comments': linked_details.get('comments', [])
+                                        }
+                                    linked_issues_details.append(linked_issue_info)
+                            except Exception as linked_obj_error:
+                                print(f"Error fetching linked issue object for {linked_issue_key}: {linked_obj_error}")
+                    print(f"All linked issues for {issue_key}: {all_linked}")
+            except Exception as link_error:
+                print(f"Error fetching linked tickets for {issue_key}: {link_error}")
+            print(f"Final linked_issues_details for {issue_key}: {linked_issues_details}")
+            return {
+                'key': issue_key,
+                'summary': main_details.get('summary', ''),
+                'description': main_details.get('description', ''),
+                'comments': main_comments,
+                'linked_issues_details': linked_issues_details
+            }
+        except Exception as e:
+            print(f"Error getting issue with links and comments for {issue_key}: {e}")
             return {}
     
     def _extract_keywords(self, text: str) -> str:
@@ -373,3 +472,11 @@ class JiraTool:
         except Exception as e:
             logger.error(f"Error getting project issues for {project_key}: {e}")
             return []
+
+# call main for the method get_issue_with_links_and_comments
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    jira_tool = JiraTool()
+    test_issue_key = "AOPS-26612"  # Replace with a valid issue key for testing
+    issue_data = jira_tool.get_issue_with_links_and_comments(test_issue_key)
+    print(issue_data)
