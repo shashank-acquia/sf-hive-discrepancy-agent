@@ -51,7 +51,7 @@ class JiraTool:
             project_list = ', '.join([f'"{key}"' for key in self.project_keys])
             return f'project in ({project_list})'
     
-    def search_issues(self, query: str, max_results: int = 20) -> List[Dict]:
+    def search_issues(self, query: str, max_results: int = 20, jira_ids: Optional[List[str]] = None) -> List[Dict]:
         """Search for JIRA issues using JQL or text search"""
         if not self.jira:
             return []
@@ -59,70 +59,170 @@ class JiraTool:
         try:
             # Build project filter
             project_filter = self._build_project_filter()
-            
-            # If query doesn't look like JQL, create a text search with proper escaping
-            if not any(keyword in query.lower() for keyword in ['project', 'status', 'assignee', 'reporter']):
-                # Text search in summary and description with proper JQL escaping
-                escaped_query = self._escape_jql_string(query)
-                search_clause = f'text ~ {escaped_query} OR summary ~ {escaped_query} OR description ~ {escaped_query}'
-                
-                # Combine with project filter
-                if project_filter:
-                    jql_query = f'({project_filter}) AND ({search_clause})'
-                else:
-                    jql_query = search_clause
-            else:
-                # User provided JQL query - add project filter if not already present
-                if project_filter and 'project' not in query.lower():
-                    jql_query = f'({project_filter}) AND ({query})'
-                else:
-                    jql_query = query
-            
-            logger.info(f"Executing JQL query: {jql_query}")
+
+            id_clause = ""
+            if jira_ids:
+                sanitized_ids = [self._escape_jql_string(jid).strip('"') for jid in jira_ids]
+                id_list_str = ', '.join(f'"{jid}"' for jid in sanitized_ids)
+                id_clause = f'key in ({id_list_str})'
+                print(f"[DEBUG] Constructed Jira ID clause for JQL: {id_clause}")
+
+            text_search_clause = ""
+            if query and query.strip():
+                # If query doesn't look like advanced JQL, treat it as a text search
+                if not any(keyword in query.lower() for keyword in ['project =', 'status =', 'assignee =']):
+                    escaped_query = self._escape_jql_string(query)
+                    field_search_clauses = [
+                        f'summary ~ {escaped_query}',
+                        f'description ~ {escaped_query}',
+                        f'comment ~ {escaped_query}'
+                    ]
+                    text_search_clause = f"({' OR '.join(field_search_clauses)})"
+                    print(f"[DEBUG] Constructed text search clause for fields [summary, description, comment].")
+                else:  # Assume user provided a valid JQL snippet
+                    text_search_clause = f'({query})'
+
+            # Combine clauses into the final JQL query
+            jql_clauses = []
+
+            # Main search logic: (ID search) OR (text search)
+            main_search_parts = []
+            if id_clause:
+                main_search_parts.append(f'({id_clause})')
+            if text_search_clause:
+                main_search_parts.append(f'({text_search_clause})')
+
+            if not main_search_parts:
+                print("[WARN] No valid search criteria for Jira (no query or IDs). Aborting search.")
+                return []
+
+            jql_clauses.append(f"({' OR '.join(main_search_parts)})")
+
+            # Project filter is always combined with AND at the start
+            if project_filter:
+                jql_clauses.insert(0, f'({project_filter})')
+
+            jql_query = ' AND '.join(jql_clauses)
+            jql_query += " ORDER BY updated DESC"  # Always sort by relevance/recency
+
+            print(f"[DEBUG] Executing final JQL query: {jql_query}")
             issues = self.jira.search_issues(jql_query, maxResults=max_results, expand='changelog')
-            
-            results = []
-            for issue in issues:
-                try:
-                    # Safe access to all issue fields with proper error handling
-                    issue_data = {
-                        'key': issue.key,
-                        'summary': getattr(issue.fields, 'summary', 'No summary'),
-                        'description': getattr(issue.fields, 'description', '') or '',
-                        'status': getattr(issue.fields.status, 'name', 'Unknown') if hasattr(issue.fields, 'status') and issue.fields.status else 'Unknown',
-                        'priority': self._safe_get_priority(issue),
-                        'assignee': getattr(issue.fields.assignee, 'displayName', 'Unassigned') if hasattr(issue.fields, 'assignee') and issue.fields.assignee else 'Unassigned',
-                        'reporter': getattr(issue.fields.reporter, 'displayName', 'Unknown') if hasattr(issue.fields, 'reporter') and issue.fields.reporter else 'Unknown',
-                        'created': str(getattr(issue.fields, 'created', 'Unknown')),
-                        'updated': str(getattr(issue.fields, 'updated', 'Unknown')),
-                        'url': f"{self.server}/browse/{issue.key}",
-                        'project': getattr(issue.fields.project, 'name', 'Unknown') if hasattr(issue.fields, 'project') and issue.fields.project else 'Unknown',
-                        'issue_type': getattr(issue.fields.issuetype, 'name', 'Unknown') if hasattr(issue.fields, 'issuetype') and issue.fields.issuetype else 'Unknown'
-                    }
-                    results.append(issue_data)
-                except Exception as field_error:
-                    logger.warning(f"Error processing issue {issue.key}: {field_error}")
-                    # Add minimal issue data even if some fields fail
-                    results.append({
-                        'key': issue.key,
-                        'summary': 'Error loading summary',
-                        'description': '',
-                        'status': 'Unknown',
-                        'priority': 'Unknown',
-                        'assignee': 'Unknown',
-                        'reporter': 'Unknown',
-                        'created': 'Unknown',
-                        'updated': 'Unknown',
-                        'url': f"{self.server}/browse/{issue.key}",
-                        'project': 'Unknown',
-                        'issue_type': 'Unknown'
-                    })
-            
+
+            print(f"[INFO] JIRA API returned {len(issues)} issues.")
+
+            results = [self._format_issue(issue) for issue in issues]
             return results
         except Exception as e:
-            logger.error(f"Error searching JIRA issues: {e}")
+            print(f"[ERROR] Error searching JIRA issues: {e}")
             return []
-    
+
+    def _format_issue(self, issue) -> Dict:
+        """Helper function to safely format a JIRA issue object into a dictionary."""
+        try:
+            issue_data = {
+                'key': issue.key,
+                'summary': getattr(issue.fields, 'summary', 'No summary'),
+                'description': getattr(issue.fields, 'description', '') or '',
+                'status': getattr(issue.fields.status, 'name', 'Unknown') if hasattr(issue.fields,
+                                                                                     'status') and issue.fields.status else 'Unknown',
+                'priority': self._safe_get_priority(issue),
+                'assignee': getattr(issue.fields.assignee, 'displayName', 'Unassigned') if hasattr(issue.fields,
+                                                                                                   'assignee') and issue.fields.assignee else 'Unassigned',
+                'reporter': getattr(issue.fields.reporter, 'displayName', 'Unknown') if hasattr(issue.fields,
+                                                                                                'reporter') and issue.fields.reporter else 'Unknown',
+                'created': str(getattr(issue.fields, 'created', 'Unknown')),
+                'updated': str(getattr(issue.fields, 'updated', 'Unknown')),
+                'url': f"{self.server}/browse/{issue.key}",
+                'project': getattr(issue.fields.project, 'name', 'Unknown') if hasattr(issue.fields,
+                                                                                       'project') and issue.fields.project else 'Unknown',
+                'issue_type': getattr(issue.fields.issuetype, 'name', 'Unknown') if hasattr(issue.fields,
+                                                                                            'issuetype') and issue.fields.issuetype else 'Unknown',
+                # --- NEW: Extracting additional rich fields ---
+                'components': [comp.name for comp in getattr(issue.fields, 'components', [])],
+                'labels': getattr(issue.fields, 'labels', []),
+                'issuelinks': [
+                    {
+                        'type': link.type.name,
+                        'direction': 'outward' if hasattr(link, 'outwardIssue') else 'inward',
+                        'linked_issue_key': getattr(link, 'outwardIssue', getattr(link, 'inwardIssue', None)).key
+                    }
+                    for link in getattr(issue.fields, 'issuelinks', []) if
+                    hasattr(link.type, 'name') and (hasattr(link, 'outwardIssue') or hasattr(link, 'inwardIssue'))
+                ]
+            }
+
+            print(f'[INFO] Formatted issue data: {issue_data}')
+            return issue_data
+        except Exception as field_error:
+            print(f"[WARNING] Error processing issue {issue.key}: {field_error}")
+            return {'key': issue.key, 'summary': 'Error loading details', 'url': f"{self.server}/browse/{issue.key}"}
+
+    def get_linked_issues(self, issue_key: str) -> List[Dict]:
+        """
+        NEW: Fetches and returns full details for all issues linked to the given issue_key.
+        """
+        if not self.jira:
+            return []
+        try:
+            print(f"[DEBUG] Fetching linked issues for {issue_key}...")
+            # First, get the main issue to find its links
+            main_issue = self.jira.issue(issue_key, expand='issuelinks')
+            if not hasattr(main_issue.fields, 'issuelinks') or not main_issue.fields.issuelinks:
+                print(f"[DEBUG] No issue links found for {issue_key}.")
+                return []
+
+            linked_issue_keys = []
+            for link in main_issue.fields.issuelinks:
+                if hasattr(link, 'outwardIssue'):
+                    linked_issue_keys.append(link.outwardIssue.key)
+                elif hasattr(link, 'inwardIssue'):
+                    linked_issue_keys.append(link.inwardIssue.key)
+
+            if not linked_issue_keys:
+                return []
+
+            print(f"[INFO] Found {len(linked_issue_keys)} linked issue keys: {linked_issue_keys}")
+            # Now, fetch these issues in a single batch query
+            # We don't need to re-apply the project filter here, as linked issues can be in any project
+            jql_query = f'key in ({", ".join(linked_issue_keys)})'
+            linked_issues_result = self.jira.search_issues(jql_query, maxResults=len(linked_issue_keys))
+
+            # Format them using our standard helper
+            formatted_linked_issues = [self._format_issue(issue) for issue in linked_issues_result]
+            return formatted_linked_issues
+
+        except Exception as e:
+            print(f"[ERROR] Failed to get linked issues for {issue_key}: {e}")
+            return []
+
+    def _print_issue_fields(self, issue):
+        """Print all fields and their values from a JIRA issue object"""
+        print(f"\n----- Fields for {issue.key} -----")
+
+        # Get all attribute names
+        field_names = dir(issue.fields)
+
+        # Filter out private/special attributes and methods
+        field_names = [f for f in field_names if not f.startswith('_') and f != 'raw']
+
+        # Print each field and its value
+        for field in field_names:
+            try:
+                value = getattr(issue.fields, field)
+                # Handle nested objects
+                if hasattr(value, '__dict__'):
+                    print(f"{field}: (object)")
+                    for k, v in vars(value).items():
+                        if not k.startswith('_'):
+                            print(f"  - {k}: {v}")
+                else:
+                    print(f"{field}: {value}")
+            except Exception as e:
+                print(f"{field}: Error retrieving value - {e}")
+
+        print("--------------------------\n")
+
+
     def get_similar_issues(self, text: str, max_results: int = 10) -> List[Dict]:
         """Find similar issues based on text content"""
         if not self.jira:
