@@ -329,11 +329,16 @@ class SlackSearchAgent:
                 reverse=True
             )[:7]
 
+            all_linked_slack_urls = set()
+            all_linked_confluence_urls = set()
             print(f"[INFO] Fetching full details for the top {len(final_ranked_tickets)} Jira tickets...")
             for ticket in final_ranked_tickets:
                 try:
                     # This call fetches comments, attachments, etc.
+                    desc_links = self._extract_crossplatform_links(ticket.get('description', ''))
                     details = self.jira_tool.get_issue_details(ticket['key'])
+                    all_linked_slack_urls.update(desc_links.get('slack_links', []))
+                    all_linked_confluence_urls.update(desc_links.get('confluence_links', []))
                     if details:
                         # Merge the detailed info into our existing ticket dictionary
                         ticket_with_details = {**ticket, 'full_details': details}
@@ -341,6 +346,13 @@ class SlackSearchAgent:
                         comment_count = len(details.get('comments', []))
                         print(
                             f"[DEBUG] Successfully fetched details for {ticket['key']} ({comment_count} comments found).")
+                        # Concatenate all comments into one string for efficient processing
+                        if(comment_count > 0):
+                            all_comments_text = " ".join([comment.get('body', '') for comment in details.get('comments', [])])
+                            comment_links = self._extract_crossplatform_links(all_comments_text)
+                            all_linked_slack_urls.update(comment_links.get('slack_links', []))
+                            all_linked_confluence_urls.update(comment_links.get('confluence_links', []))
+
                     else:
                         # If details fail, append the original ticket summary
                         final_jira_results_with_details.append(ticket)
@@ -352,6 +364,42 @@ class SlackSearchAgent:
             print(f"[ERROR] Jira search process failed: {e}")
             import traceback
             traceback.print_exc()
+
+        detailed_slack_messages = []
+        for url in all_linked_slack_urls:
+            try:
+                slack_message_details = self.slack_tool.search_in_channels(query=url,channels=[ch.strip() for ch in self.search_channels if ch.strip()], limit=2)
+                if slack_message_details:
+                    detailed_slack_messages.append(slack_message_details[0])
+                    logger.info(f"Fetched details for Slack message: {url}")
+            except Exception as e:
+                logger.warning(f"Could not fetch details for Slack message {url}: {e}")
+        # Add fetched detailed messages to the results, ensuring no duplicates with initial slack_messages
+        existing_slack_permalinks = {msg['permalink'] for msg in results['slack_messages']}
+        for msg in detailed_slack_messages:
+            if msg['permalink'] not in existing_slack_permalinks:
+                print("Adding detailed Slack message from linked URL:" + msg['permalink'])
+                results['slack_messages'].append(msg)
+                existing_slack_permalinks.add(msg['permalink'])
+
+        detailed_confluence_pages = []
+        print("Adding detailed Confluence page from linked URL:" + str(all_linked_confluence_urls))
+        try:
+            if os.getenv('CONFLUENCE_SERVER'):
+                for url in all_linked_confluence_urls:
+
+                    confluence_results = self.confluence_tool.search_similar_content(url, limit=1)
+                    detailed_confluence_pages.extend(confluence_results)
+                # Add fetched detailed pages to the results, ensuring no duplicates with initial confluence_pages
+                existing_confluence_urls = {page['url'] for page in results['confluence_pages']}
+                for page in detailed_confluence_pages:
+                    if page['url'] not in existing_confluence_urls:
+                        # print("Adding detailed Confluence page from linked URL:" + page['url'])
+                        results['confluence_pages'].append(page)
+                        existing_confluence_urls.add(page['url'])
+        except Exception as e:
+            print(f"[WARNING] Confluence search failed: {e}")
+
 
         results['jira_issues'] = final_jira_results_with_details
         results['platform_insights'] = self._generate_platform_insights(results)
@@ -756,3 +804,27 @@ Please provide a comprehensive response that helps the user with their query. In
                 'success': False,
                 'error': str(e)
             }
+
+    def _extract_crossplatform_links(self, text: str) -> Dict[str, List[str]]:
+        """Extract Slack and Confluence links from text"""
+        if not text:
+            return {'slack_links': [], 'confluence_links': []}
+    
+        # Patterns for Slack and Confluence links
+        slack_pattern = r'https://acquia\.slack\.com/archives/[A-Z0-9]+/p[0-9]+'
+        confluence_pattern = r'https://acquia\.atlassian\.net/wiki/[^\s\"\'\)]+'
+    
+        # Find all matches
+        slack_links = re.findall(slack_pattern, text)
+        confluence_links = re.findall(confluence_pattern, text)
+    
+        # Log what we found
+        if slack_links:
+            logger.info(f"Found {len(slack_links)} Slack links in Jira content: {slack_links[:3]}")
+        if confluence_links:
+            logger.info(f"Found {len(confluence_links)} Confluence links in Jira content: {confluence_links[:3]}")
+
+        return {
+            'slack_links': slack_links,
+            'confluence_links': confluence_links
+        }
