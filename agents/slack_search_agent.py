@@ -242,7 +242,7 @@ class SlackSearchAgent:
         try:
             if self.search_channels and self.search_channels[0]:
                 slack_results = self.slack_tool.search_in_channels(
-                    query=query,
+                    query=search_query_for_tools,
                     channels=[ch.strip() for ch in self.search_channels if ch.strip()],
                     limit=10
                 )
@@ -250,10 +250,10 @@ class SlackSearchAgent:
                 print(f"[INFO] Found {len(slack_results)} relevant Slack messages")
         except Exception as e:
             print(f"[ERROR] Error searching Slack: {e}")
-
+         
         try:
             if os.getenv('CONFLUENCE_SERVER'):
-                confluence_results = self.confluence_tool.search_similar_content(query, limit=5)
+                confluence_results = self.confluence_tool.search_similar_content(search_query_for_tools, limit=5)
                 results['confluence_pages'] = confluence_results
                 print(f"[INFO] Found {len(confluence_results)} relevant Confluence pages")
         except Exception as e:
