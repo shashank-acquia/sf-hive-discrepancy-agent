@@ -238,49 +238,18 @@ class SlackSearchAgent:
         search_query_for_tools = " ".join(remaining_keywords) if remaining_keywords else query
         print(f"[DEBUG] Extracted Keywords: {keywords}, Jira IDs: {jira_ids_found}")
 
-        # Step 2: Enhanced Slack Search with JIRA key extraction and deduplication
+        # Step 2: Search Slack & Confluence (these are independent)
         try:
             if self.search_channels and self.search_channels[0]:
-                # Use the new enhanced search method (channels auto-loaded from SLACK_SEARCH_CHANNELS env var)
-                enhanced_slack_results = self.slack_tool.search_enhanced_with_jira_dedup(
+                slack_results = self.slack_tool.search_in_channels(
                     query=query,
+                    channels=[ch.strip() for ch in self.search_channels if ch.strip()],
                     limit=10
                 )
-                
-                # Extract the enhanced results
-                results['slack_messages'] = enhanced_slack_results.get('slack_messages', [])
-                jira_keys_from_slack = enhanced_slack_results.get('jira_keys_found', [])
-                
-                # Add discovered JIRA keys to our search
-                if jira_keys_from_slack:
-                    jira_ids_found.extend(jira_keys_from_slack)
-                    print(f"[INFO] Found additional JIRA keys in Slack: {jira_keys_from_slack}")
-                
-                print(f"[INFO] Found {len(results['slack_messages'])} relevant Slack messages "
-                      f"(deduplicated from {enhanced_slack_results.get('total_messages_before_dedup', 0)})")
-                print(f"[INFO] Extracted {len(jira_keys_from_slack)} JIRA keys from Slack threads")
-            else:
-                # Fallback to regular search if no channels specified
-                slack_results = self.slack_tool.search_messages(query, limit=10)
                 results['slack_messages'] = slack_results
-                print(f"[INFO] Found {len(slack_results)} relevant Slack messages (regular search)")
+                print(f"[INFO] Found {len(slack_results)} relevant Slack messages")
         except Exception as e:
             print(f"[ERROR] Error searching Slack: {e}")
-            # Fallback to regular search
-            try:
-                if self.search_channels and self.search_channels[0]:
-                    slack_results = self.slack_tool.search_in_channels(
-                        query=query,
-                        channels=[ch.strip() for ch in self.search_channels if ch.strip()],
-                        limit=10
-                    )
-                else:
-                    slack_results = self.slack_tool.search_messages(query, limit=10)
-                results['slack_messages'] = slack_results
-                print(f"[INFO] Fallback search found {len(slack_results)} Slack messages")
-            except Exception as fallback_error:
-                print(f"[ERROR] Fallback Slack search also failed: {fallback_error}")
-                results['slack_messages'] = []
 
         try:
             if os.getenv('CONFLUENCE_SERVER'):
