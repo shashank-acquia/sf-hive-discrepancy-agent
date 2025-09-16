@@ -4,6 +4,9 @@ import re
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
+
+import httpx
+
 try:
     from langchain_openai import ChatOpenAI
     from langchain_core.messages import HumanMessage, SystemMessage
@@ -94,14 +97,16 @@ class SlackSearchAgent:
             self.nltk_stopwords = set(stopwords.words('english'))
         except Exception:
             self.nltk_stopwords = set()
-        
+
+        client = httpx.Client(verify=False)
         # Initialize LLM
         if ChatOpenAI is not None:
             try:
                 self.llm = ChatOpenAI(
                     model_name=os.getenv('OPENAI_MODEL', 'gpt-3.5-turbo'),
                     temperature=0.3,
-                    openai_api_key=os.getenv('OPENAI_API_KEY')
+                    openai_api_key=os.getenv('OPENAI_API_KEY'),
+                    http_client=client
                 )
             except Exception as e:
                 logger.warning(f"Failed to initialize LLM: {e}")

@@ -39,7 +39,8 @@ class ConfluenceTool:
                     password=self.api_token,
                     cloud=True,  # Set to False for Confluence Server
                     session=session,
-                    timeout=30  # 30 second timeout
+                    timeout=30,  # 30 second timeout
+                    verify_ssl=False
                 )
                 
                 # Test the connection

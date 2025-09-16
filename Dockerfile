@@ -1,30 +1,42 @@
-# Use official lightweight Python image
-FROM python:3.10-slim
+# ===================================================================================
+# Dockerfile for CDP AI TOOLS (Final Production-Ready Version)
+# ===================================================================================
+FROM python:3.10-slim-bullseye
 
-# Install system dependencies for compiling Python packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libffi-dev \
-    libssl-dev \
-    || (apt-get --fix-missing update && apt-get install -y gcc libffi-dev libssl-dev) \
-    && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory
+LABEL author="CDP AI Team"
+LABEL description="Flask application for CDP AI Tools including discrepancy checks and an AI helpdesk."
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+ENV SENTENCE_TRANSFORMERS_HOME=/root/.cache/torch/sentence_transformers
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential git ca-certificates && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY certs/*.pem /usr/local/share/ca-certificates/
+RUN update-ca-certificates
+
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
 WORKDIR /app
 
-# Copy requirements first
-COPY requirements.txt .
+COPY requirements.txt ./
 
-# Install Python dependencies
-RUN pip install --upgrade pip \
-    && pip install -r requirements.txt
-RUN pip3 install --upgrade certifi
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the rest of the app code
+COPY ./all-MiniLM-L6-v2 /app/models/all-MiniLM-L6-v2
+
 COPY . .
 
-# Expose app port
-EXPOSE 5000
+RUN python -c "from tools.utils import download_nltk_data; download_nltk_data()"
 
-# Start the app
-CMD ["python", "app.py"]
+EXPOSE 8081
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8081/ || exit 1
+
+CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:8081", "app:app"]

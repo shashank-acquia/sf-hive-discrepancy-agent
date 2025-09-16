@@ -25,3 +25,4 @@ asyncio-mqtt>=0.11.0
 sentence-transformers
 torch
 nltk
+gunicorn==22.0.0

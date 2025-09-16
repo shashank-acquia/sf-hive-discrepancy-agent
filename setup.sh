@@ -1,60 +1,33 @@
-#!/bin/bash
-set -e
+# ===================================================================================
+# Dockerfile for CDP AI TOOLS (Corrected Version)
+# ===================================================================================
+FROM python:3.10-slim-bullseye
 
-echo "====================================================="
-echo "SF-Hive Discrepancy Agent - Environment Setup"
-echo "====================================================="
+LABEL author="CDP AI Team"
+LABEL description="Flask application for CDP AI Tools including discrepancy checks and an AI helpdesk."
 
-# Check if Docker is installed
-if ! command -v docker &> /dev/null; then
-    echo "Docker is not installed. Please install Docker first."
-    exit 1
-fi
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Check if conda is installed
-if ! command -v conda &> /dev/null; then
-    echo "Error: Conda is not installed or not in PATH."
-    echo "Please install Conda first: https://docs.conda.io/projects/conda/en/latest/user-guide/install/"
-    exit 1
-fi
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends build-essential git && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Check if .env file exists, if not create a template
-if [ ! -f .env ]; then
-    echo "Creating .env template file..."
-    cat > .env << EOL
-SNOWFLAKE_USER=your-snowflake-username
-SNOWFLAKE_ACCOUNT=your-snowflake-account
-SNOWFLAKE_WAREHOUSE=your-snowflake-warehouse
-SNOWFLAKE_DATABASE=your-snowflake-database
-SNOWFLAKE_SCHEMA=your-snowflake-schema
-HIVE_SCRIPT_DIR=/path/to/hive/scripts
-SNOWFLAKE_SCRIPT_DIR=/path/to/snowflake/scripts
-OPENAI_API_KEY=your-openai-api-key
-EOL
-    echo "Created .env template file. Please update it with your actual values."
-fi
+WORKDIR /app
 
-# Create conda environment
-echo "Creating conda environment: snowflake_ai with Python 3.10..."
-conda create -n snowflake_ai python=3.10 -y
+COPY requirements.txt .
 
-# Activate the environment
-echo "Activating conda environment..."
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate snowflake_ai
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Install dependencies
-echo "Installing Python dependencies..."
-pip install snowflake-connector-python pandas python-dotenv langchain openai
-pip install -U langchain-ollama
-pip install flask langchain_community docx2txt faiss-cpu
+RUN python -c "from tools.utils import download_nltk_data; download_nltk_data()"
 
-# Install IPython kernel
-echo "Installing IPython kernel..."
-conda install ipykernel -y
-python -m ipykernel install --user --name=snowflake_ai
+COPY . .
 
-echo "====================================================="
-echo "Setup complete! You can now run ./build_docker.sh to build the Docker image."
-echo "====================================================="
-echo "Don't forget to edit the .env file with your configuration before running the agent."
+EXPOSE 8081
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:8081/ || exit 1
+
+CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:8081", "app:app"]
