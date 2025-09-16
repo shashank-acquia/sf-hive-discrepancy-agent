@@ -119,10 +119,70 @@ class SlackTool:
             logger.error(f"Error getting channel info: {e}")
             return {}
     
-    def search_in_channels(self, query: str, channels: List[str], limit: int = 10) -> List[Dict]:
-        """Search for messages in specific channels with enhanced thread detection"""
+    def search_in_channels(self, query: str, channels: List[str],  limit: int = 10, slack_ids: Optional[List[str]] = None, message_text: Optional[str] = None) -> List[Dict]:
+        """Search for messages in specific channels with enhanced thread detection and direct Slack URL lookup"""
         all_results = []
-        
+
+        # Extract Slack URLs from message_text if provided
+        if message_text:
+            import re
+            slack_url_pattern = r'https://acquia\.slack\.com/archives/[A-Z0-9]+/p[0-9]+'
+            extracted_urls = re.findall(slack_url_pattern, message_text)
+            if slack_ids:
+                slack_ids = list(set(slack_ids + extracted_urls))
+            else:
+                slack_ids = extracted_urls
+
+        # If slack_ids are provided, fetch those threads/messages directly
+        if slack_ids:
+            for url in slack_ids:
+                # Example URL: https://acquia.slack.com/archives/C012J3T0S9H/p1756995100810879
+                import re
+                match = re.match(r'https://acquia\.slack\.com/archives/([A-Z0-9]+)/p(\d+)', url)
+                if match:
+                    channel_id = match.group(1)
+                    ts_raw = match.group(2)
+                    # Slack timestamps are like 1756995100810879, need to convert to 1756995100.810879
+                    ts = ts_raw[:10] + '.' + ts_raw[10:] if len(ts_raw) > 10 else ts_raw
+                    try:
+                        response = self.client.conversations_replies(
+                            channel=channel_id,
+                            ts=ts,
+                            limit=20
+                        )
+                        if response['ok']:
+                            for message in response['messages']:
+                                all_results.append({
+                                    'text': message.get('text', ''),
+                                    'user': message.get('user', ''),
+                                    'channel': channel_id,
+                                    'ts': message.get('ts', ''),
+                                    'permalink': url,
+                                    'score': 100,  # High score for direct match
+                                    'thread_summary': '',
+                                    'reply_count': message.get('reply_count', 0)
+                                })
+                    except SlackApiError as e:
+                        error_msg = str(e)
+                        logger.error(f"Error fetching thread for Slack URL {url}: {e}")
+                        
+                        # Add fallback for channel_not_found error
+                        if "channel_not_found" in error_msg:
+                            logger.warning(f"Channel {channel_id} not found or bot doesn't have access. Adding placeholder result.")
+                            # Add a placeholder result with error information
+                            all_results.append({
+                                'text': f"⚠️ Unable to access this message. The channel may be private, archived, or the bot lacks access permissions.",
+                                'user': "SYSTEM",
+                                'channel': channel_id,
+                                'ts': ts,
+                                'permalink': url,
+                                'score': 50,  # Lower score for error placeholder
+                                'thread_summary': "Access error: channel_not_found",
+                                'reply_count': 0,
+                                'error': True
+                            })
+                        continue
+
         # If no user token available, use conversation history as fallback
         if not self.user_client:
             logger.warning("No user token available for search. Using conversation history as fallback.")
@@ -496,7 +556,14 @@ class SlackTool:
             return ""
             
         except SlackApiError as e:
+            error_msg = str(e)
             logger.error(f"Error getting thread replies for {thread_ts}: {e}")
+            
+            # Provide more specific error message for channel_not_found
+            if "channel_not_found" in error_msg:
+                logger.warning(f"Channel {channel_id} not found or bot doesn't have access.")
+                return "⚠️ Unable to access this thread. The channel may be private, archived, or the bot lacks access permissions."
+            
             return f"Error accessing thread (may need permissions): {str(e)}"
         except Exception as e:
             logger.error(f"Unexpected error getting thread replies: {e}")
@@ -552,7 +619,20 @@ class SlackTool:
                 return []
                 
         except SlackApiError as e:
+            error_msg = str(e)
             logger.error(f"Error getting thread messages for {thread_ts}: {e}")
+            
+            # Add specific handling for channel_not_found error
+            if "channel_not_found" in error_msg:
+                logger.warning(f"Channel {channel_id} not found or bot doesn't have access.")
+                # Return a placeholder message to indicate the access issue
+                return [{
+                    'text': f"⚠️ Unable to access this thread. The channel may be private, archived, or the bot lacks access permissions.",
+                    'user': "SYSTEM",
+                    'ts': thread_ts,
+                    'error': True,
+                    'jira_tickets': []
+                }]
             return []
         except Exception as e:
             logger.error(f"Unexpected error getting thread messages: {e}")

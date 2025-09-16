@@ -161,7 +161,7 @@ class SlackSearchAgent:
     def _extract_entity_ids(self, keywords: List[str]) -> Dict[str, List[str]]:
         """
         Parses a list of keywords to identify and extract specific entity IDs.
-        Currently supports Jira IDs.
+        Currently supports Jira IDs and Slack URLs.
         """
         ids = {
             "jira_ids": [],
@@ -171,17 +171,24 @@ class SlackSearchAgent:
         }
         # Regex for standard Jira keys (e.g., PROJ-123, A1DEV-12345)
         jira_pattern = re.compile(r'\b[A-Z0-9]{2,10}-\d+\b', re.IGNORECASE)
+        # Regex for Slack URLs
+        slack_url_pattern = re.compile(r'https://acquia\.slack\.com/archives/[A-Z0-9]+/p[0-9]+', re.IGNORECASE)
 
         for kw in keywords:
             # Check for Jira IDs
             if jira_pattern.fullmatch(kw):  # Use fullmatch to ensure the whole keyword is a Jira ID
                 ids["jira_ids"].append(kw.upper())
+            # Check for Slack URLs
+            elif slack_url_pattern.fullmatch(kw):
+                ids["slack_ids"].append(kw)
             else:
-                # Add other ID patterns here for Slack, Confluence if needed in the future
+                # Add other ID patterns here for Confluence if needed in the future
                 ids["remaining_keywords"].append(kw)
 
         if ids["jira_ids"]:
             print(f"[DEBUG] Identified Jira IDs from keywords: {ids['jira_ids']}")
+        if ids["slack_ids"]:
+            print(f"[DEBUG] Identified Slack URLs from keywords: {ids['slack_ids']}")
 
         return ids
         
@@ -234,6 +241,7 @@ class SlackSearchAgent:
         keywords = self._extract_keywords_with_llm(query)
         entity_ids = self._extract_entity_ids(keywords)
         jira_ids_found = entity_ids['jira_ids']
+        slack_ids_found = entity_ids['slack_ids']
         remaining_keywords = entity_ids['remaining_keywords']
         search_query_for_tools = " ".join(remaining_keywords) if remaining_keywords else query
         print(f"[DEBUG] Extracted Keywords: {keywords}, Jira IDs: {jira_ids_found}")
@@ -244,7 +252,9 @@ class SlackSearchAgent:
                 slack_results = self.slack_tool.search_in_channels(
                     query=search_query_for_tools,
                     channels=[ch.strip() for ch in self.search_channels if ch.strip()],
-                    limit=10
+                    limit=10,
+                    slack_ids=slack_ids_found,
+                    message_text=query
                 )
                 results['slack_messages'] = slack_results
                 print(f"[INFO] Found {len(slack_results)} relevant Slack messages")
@@ -330,7 +340,7 @@ class SlackSearchAgent:
             )[:7]
 
             all_linked_slack_urls = set()
-            all_linked_confluence_urls = set()
+            all_linked_confluence_urls = set();
             print(f"[INFO] Fetching full details for the top {len(final_ranked_tickets)} Jira tickets...")
             for ticket in final_ranked_tickets:
                 try:
