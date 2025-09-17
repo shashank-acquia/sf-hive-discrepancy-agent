@@ -10,6 +10,11 @@ import re
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
+from flask import Flask, render_template, request, jsonify, session
+from flask_caching import Cache
+import secrets
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from tools.utils import download_nltk_data
 
 # Import MCP integration
@@ -37,6 +42,34 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+cache_config = {
+    "CACHE_TYPE": "SimpleCache",
+    "CACHE_DEFAULT_TIMEOUT": 3600  # 1 hour
+}
+cache = Cache(config=cache_config)
+cache.init_app(app)
+
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+    strategy="fixed-window"
+)
+
+app.secret_key = os.getenv("FLASK_SECRET_KEY", secrets.token_hex(16))
+
+def search_cache_key(*args, **kwargs):
+    if session.get('disable_cache'):
+        return None
+
+    data = request.get_json()
+    query = data.get('query', '').strip().lower()
+
+    cache_key = f"search_cache::{query}"
+    logger.info(f"Generated cache key: {cache_key}")
+    return cache_key
 
 search_agent = SlackSearchAgent()
 
@@ -618,9 +651,21 @@ def metadata():
 
 
 @app.route("/slack/search", methods=["POST"])
+@limiter.limit("10 per minute")
+@cache.cached(timeout=7200, make_cache_key=search_cache_key)
 def slack_search():
     """API endpoint for searching across Jira, Slack, and Confluence with conditional MCP/API search"""
-    
+    is_cached = False
+    data = request.get_json()
+    query = data.get('query', '').strip().lower()
+    current_key = f"search_cache::{query}"
+
+    if cache.has(current_key) and not session.get('disable_cache'):
+        is_cached = True
+        logger.info(f"✅ Cache HIT for query: '{query}'")
+    else:
+        logger.info(f"➡️ Cache MISS for query: '{query}'")
+
     try:
         data = request.get_json()
         
@@ -1070,20 +1115,30 @@ def slack_search():
                 'solution_analysis': solution_analysis or {
                     'solutions': [],
                     'error': 'No solution analysis available'
-                }
+                },
+                'is_cached': is_cached
             })
         else:
             return jsonify({
                 'success': False,
-                'error': result.get('error', 'Search failed')
+                'error': result.get('error', 'Search failed'),
+                'is_cached': False
             }), 500
         
     except Exception as e:
         logger.error(f"Error in slack search API: {e}")
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'is_cached': False
         }), 500
+
+@app.route("/cache/toggle", methods=["POST"])
+def toggle_cache():
+    session['disable_cache'] = not session.get('disable_cache', False)
+    is_disabled = session['disable_cache']
+    logger.info(f"Cache disabled status set to: {is_disabled}")
+    return jsonify({'success': True, 'cache_disabled': is_disabled})
 
 @app.route("/bot/start", methods=["POST"])
 def start_bot_endpoint():

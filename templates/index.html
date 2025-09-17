@@ -326,6 +326,47 @@ box-sizing: border-box;
     border-color: #3498db;
     box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
 }
+
+.cache-status {
+text-align: center;
+margin-top: -3rem;
+margin-bottom: 1.5rem;
+padding: 0.5rem;
+border-radius: 6px;
+font-size: 0.9rem;
+display: none;
+}
+.cache-hit {
+background-color: #e0f2f1;
+color: #00796b;
+border: 1px solid #b2dfdb;
+}
+.cache-toggle-btn {
+  background: linear-gradient(135deg, #38b2ac 0%, #319795 100%);
+  color: white;
+  border: none;
+  padding: 0.8rem 0.2rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(56, 178, 172, 0.3);
+}
+
+.cache-toggle-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(56, 178, 172, 0.4);
+}
+
+.cache-toggle-btn.disabled {
+  background: linear-gradient(135deg, #f56565 0%, #dd2c00 100%);
+  box-shadow: 0 4px 12px rgba(245, 101, 101, 0.3);
+}
+
+.cache-toggle-btn.disabled:hover {
+  box-shadow: 0 6px 16px rgba(245, 101, 101, 0.4);
+}
   </style>
 </head>
 <body>
@@ -438,6 +479,8 @@ box-sizing: border-box;
           >
             🚀 Search with MCP
           </button>
+            <div id="search-controls" style="text-align: center; margin-top: 1rem;">
+            </div>
         </div>
       </div>
 
@@ -449,6 +492,8 @@ box-sizing: border-box;
           <p style="margin: 0.5rem 0 0 0; color: #666; font-size: 0.9rem;">Analyzing Slack, Jira, and Confluence with AI enhancement</p>
         </div>
       </div>
+
+      <div id="cache-status-container" class="cache-status"></div>
 
       <!-- Search Results -->
       <div id="search-results" style="display: none;">
@@ -757,10 +802,13 @@ box-sizing: border-box;
 
       const searchSpinner = document.getElementById('search-spinner');
       const searchResults = document.getElementById('search-results');
+      const cacheStatusContainer = document.getElementById('cache-status-container');
       
       // Show spinner and hide previous results
       searchSpinner.style.display = 'block';
       searchResults.style.display = 'none';
+      cacheStatusContainer.style.display = 'none';
+      cacheStatusContainer.className = 'cache-status';
 
       // Make API call to /slack/search
       fetch('/slack/search', {
@@ -774,6 +822,10 @@ box-sizing: border-box;
         })
       })
       .then(response => {
+          if (response.status === 429) {
+            alert('You are making too many requests. Please wait a minute and try again.');
+            throw new Error('Rate limit exceeded');
+        }
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -782,14 +834,21 @@ box-sizing: border-box;
       .then(data => {
         console.log('🔍 Search API Response:', data); // Debug log
         if (data.success) {
+            if (data.is_cached) {
+              cacheStatusContainer.textContent = '⚡️ Fast response loaded from cache. To get fresh results, disable the cache.';
+              cacheStatusContainer.classList.add('cache-hit');
+              cacheStatusContainer.style.display = 'block';
+            }
           displaySearchResults(data);
         } else {
           throw new Error(data.error || 'Search failed');
         }
       })
       .catch(error => {
-        console.error('Search error:', error);
-        alert('Search failed: ' + error.message);
+          if (error.message !== 'Rate limit exceeded') {
+            console.error('Search error:', error);
+            alert('Search failed: ' + error.message);
+          }
       })
       .finally(() => {
         searchSpinner.style.display = 'none';
@@ -1177,6 +1236,37 @@ box-sizing: border-box;
       // Show results
       searchResults.style.display = 'block';
     }
+
+    let isCacheDisabled = false;
+
+  function updateCacheButton() {
+    const controlsContainer = document.getElementById('search-controls');
+    let buttonHTML = `
+      <button id="cache-toggle" class="cache-toggle-btn ${isCacheDisabled ? 'disabled' : ''}" onclick="toggleCacheSetting()"  onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 16px rgba(102, 126, 234, 0.4)'"
+            onmouseout="this.style.transform='translateY(0px)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.3)'">
+        Cache is ${isCacheDisabled ? 'DISABLED' : 'ENABLED'}
+      </button>
+    `;
+    controlsContainer.innerHTML = buttonHTML;
+  }
+
+  function toggleCacheSetting() {
+    fetch('/cache/toggle', { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          isCacheDisabled = data.cache_disabled;
+          updateCacheButton();
+          alert(`Cache is now ${isCacheDisabled ? 'DISABLED' : 'ENABLED'} for your session.`);
+        }
+      });
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    updateCacheButton();
+  });
+
+
 
   </script>
 </body>

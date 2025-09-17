@@ -26,3 +26,7 @@ sentence-transformers
 torch
 nltk
 gunicorn==22.0.0
+
+# Caching
+Flask-Caching==2.1.0
+Flask-Limiter==3.5.1
