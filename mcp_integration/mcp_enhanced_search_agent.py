@@ -1011,6 +1011,138 @@ Please provide a comprehensive analysis and summary of these search results.
             print(f"  🚨 EXCEPTION parsing Slack URL: {e}")
             return None
 
+    def _sort_jira_results_by_priority(self, jira_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Sort Jira results by priority: Closed > High Priority > Recent"""
+        def jira_priority_score(result):
+            score = 0
+            status = result.get('metadata', {}).get('status', '').lower()
+            priority = result.get('metadata', {}).get('priority', '').lower()
+            
+            # Closed tickets get highest priority (actual resolutions)
+            if status == 'closed':
+                score += 100
+            elif status == 'resolved':
+                score += 80
+            
+            # High priority issues
+            if priority in ['critical', 'high']:
+                score += 50
+            elif priority == 'medium':
+                score += 25
+            
+            # Relevance score from search
+            relevance = result.get('relevance_score', 0)
+            score += relevance * 10
+            
+            return score
+        
+        return sorted(jira_results, key=jira_priority_score, reverse=True)
+    
+    def _sort_slack_results_by_relevance(self, slack_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Sort Slack results by relevance: High scores > Reply count > Recent"""
+        def slack_priority_score(result):
+            score = 0
+            
+            # Search relevance score (normalized)
+            relevance = result.get('relevance_score', 0)
+            score += relevance * 100
+            
+            # Number of replies (more discussion = more likely to have solutions)
+            reply_count = result.get('metadata', {}).get('reply_count', 0)
+            score += min(reply_count * 5, 50)  # Cap at 50 points
+            
+            # Slack search score
+            slack_score = result.get('metadata', {}).get('score', 0)
+            if slack_score > 0:
+                # Normalize Slack score (they can be in thousands)
+                normalized_slack_score = min(slack_score / 1000, 20)
+                score += normalized_slack_score
+            
+            return score
+        
+        return sorted(slack_results, key=slack_priority_score, reverse=True)
+    
+    def _sort_confluence_results_by_relevance(self, confluence_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Sort Confluence results by relevance: Recent > High relevance > Space priority"""
+        def confluence_priority_score(result):
+            score = 0
+            
+            # Search relevance score
+            relevance = result.get('relevance_score', 0)
+            score += relevance * 100
+            
+            # Recent updates (check last_modified)
+            last_modified = result.get('metadata', {}).get('last_modified', '')
+            if '2024' in str(last_modified):
+                score += 30
+            elif '2023' in str(last_modified):
+                score += 15
+            
+            # Space priority (some spaces might be more important)
+            space = result.get('metadata', {}).get('space', '').lower()
+            if any(priority_word in space for priority_word in ['engineering', 'dev', 'docs', 'kb']):
+                score += 20
+            
+            return score
+        
+        return sorted(confluence_results, key=confluence_priority_score, reverse=True)
+    
+    def _filter_top_results_per_platform(self, results: List[Dict[str, Any]], max_per_platform: int = 3) -> Dict[str, List[Dict[str, Any]]]:
+        """Group results by platform and return top N results per platform for LLM analysis"""
+        
+        # Group results by platform
+        jira_results = [r for r in results if r.get('platform') == 'jira']
+        slack_results = [r for r in results if r.get('platform') == 'slack']
+        confluence_results = [r for r in results if r.get('platform') == 'confluence']
+        other_results = [r for r in results if r.get('platform') not in ['jira', 'slack', 'confluence']]
+        
+        print(f"\n📊 PLATFORM RESULT DISTRIBUTION:")
+        print(f"  📋 Jira results: {len(jira_results)}")
+        print(f"  💬 Slack results: {len(slack_results)}")
+        print(f"  📄 Confluence results: {len(confluence_results)}")
+        print(f"  🔧 Other results: {len(other_results)}")
+        
+        # Sort each platform by priority
+        jira_sorted = self._sort_jira_results_by_priority(jira_results)
+        slack_sorted = self._sort_slack_results_by_relevance(slack_results)
+        confluence_sorted = self._sort_confluence_results_by_relevance(confluence_results)
+        
+        # Take top N from each platform
+        top_jira = jira_sorted[:max_per_platform]
+        top_slack = slack_sorted[:max_per_platform]
+        top_confluence = confluence_sorted[:max_per_platform]
+        
+        print(f"\n🎯 SELECTED FOR LLM ANALYSIS (TOP {max_per_platform} PER PLATFORM):")
+        print(f"  📋 Jira tickets selected: {len(top_jira)}")
+        for i, result in enumerate(top_jira, 1):
+            jira_key = self._extract_jira_key_from_result(result)
+            status = result.get('metadata', {}).get('status', 'Unknown')
+            priority = result.get('metadata', {}).get('priority', 'Unknown')
+            print(f"    {i}. {jira_key} - Status: {status}, Priority: {priority}")
+        
+        print(f"  💬 Slack threads selected: {len(top_slack)}")
+        for i, result in enumerate(top_slack, 1):
+            channel = result.get('metadata', {}).get('channel', 'unknown')
+            score = result.get('metadata', {}).get('score', 0)
+            replies = result.get('metadata', {}).get('reply_count', 0)
+            print(f"    {i}. #{channel} - Score: {score:.0f}, Replies: {replies}")
+        
+        print(f"  📄 Confluence pages selected: {len(top_confluence)}")
+        for i, result in enumerate(top_confluence, 1):
+            title = result.get('title', 'Untitled')[:50]
+            space = result.get('metadata', {}).get('space', 'Unknown')
+            print(f"    {i}. {title}... - Space: {space}")
+        
+        # Return categorized results
+        return {
+            'priority_for_llm': top_jira + top_slack + top_confluence,
+            'remaining_jira': jira_sorted[max_per_platform:],
+            'remaining_slack': slack_sorted[max_per_platform:],
+            'remaining_confluence': confluence_sorted[max_per_platform:],
+            'other_results': other_results,
+            'all_results': results
+        }
+
     def _generate_llm_context_from_insights(self, platform_insights: Dict[str, Any], query: str, context: Optional[Dict]) -> str:
         """Generate structured context for LLM to improve suggestions"""
         llm_context_parts = [
@@ -1111,6 +1243,26 @@ Please provide a comprehensive analysis and summary of these search results.
         print(f"  Excluded Types: Epic")
         print(f"  Processing only linked issues from expected projects\n")
         
+        # 🚀 OPTIMIZATION: Filter to top 3 results per platform for LLM analysis
+        print(f"💰 LLM API CALL OPTIMIZATION:")
+        print(f"  Original results: {len(results)} total")
+        print(f"  Limiting to top 3 per platform (Jira, Slack, Confluence) for expensive LLM analysis")
+        
+        filtered_results = self._filter_top_results_per_platform(results, max_per_platform=3)
+        priority_results = filtered_results['priority_for_llm']  # Max 9 results for LLM
+        remaining_results = (filtered_results['remaining_jira'] + 
+                           filtered_results['remaining_slack'] + 
+                           filtered_results['remaining_confluence'] + 
+                           filtered_results['other_results'])
+        
+        print(f"\n🎯 LLM ANALYSIS PLAN:")
+        print(f"  Priority results (with LLM): {len(priority_results)} results")
+        print(f"  Remaining results (basic processing): {len(remaining_results)} results")
+        print(f"  Expected LLM API calls: {len(priority_results)} + 1 comprehensive = {len(priority_results) + 1} total")
+        print(f"  💸 Cost savings: ~{len(results) - len(priority_results)} LLM calls avoided!")
+        
+        # Process ALL results for basic information (error patterns, technical context)
+        print(f"\n📊 BASIC PROCESSING (ALL {len(results)} RESULTS):")
         for result in results:
             # Ensure result is a dictionary
             if not isinstance(result, dict):
@@ -1132,18 +1284,13 @@ Please provide a comprehensive analysis and summary of these search results.
                 if jira_key:
                     project_key = jira_key.split('-')[0] if '-' in jira_key else ''
                     if project_key not in expected_projects:
-                        print(f"❌ Skipping JIRA {jira_key} - not from expected projects {expected_projects}")
-                        continue
+                        continue  # Skip without logging to reduce noise
                 
                 # Exclude Epic type issues
                 if issue_type == 'epic':
-                    print(f"❌ Skipping JIRA {jira_key} - Epic type excluded")
-                    continue
-                
-                # Only process linked issues (if this is a search result, it should be linked)
-                print(f"✅ Processing JIRA {jira_key} - project: {project_key}, type: {issue_type}")
+                    continue  # Skip without logging to reduce noise
             
-            # Extract error patterns
+            # Extract error patterns (for all results)
             if any(error_word in content for error_word in ['error', 'exception', 'failed', 'failure']):
                 error_patterns.append({
                     'platform': platform,
@@ -1152,155 +1299,7 @@ Please provide a comprehensive analysis and summary of these search results.
                     'title': result.get('title', '')
                 })
             
-            # Enhanced Jira analysis: Extract comments for solutions with LLM analysis
-            if platform == 'jira':
-                jira_key = self._extract_jira_key_from_result(result)
-                ticket_status = result.get('metadata', {}).get('status', '').lower()
-                
-                # This ticket already passed filtering above, so it's valid
-                issue_type = result.get('metadata', {}).get('issue_type', '')
-                
-                # PRIORITIZE CLOSED TICKETS - they have actual resolutions
-                print(f"\n🎫 PROCESSING FILTERED JIRA TICKET:")
-                print(f"  Key: {jira_key}")
-                print(f"  Status: {ticket_status}")
-                print(f"  Type: {issue_type}")
-                print(f"  Title: {result.get('title', 'No title')}")
-                print(f"  URL: {result.get('url', 'No URL')}")
-                
-                if jira_key and ticket_status == 'closed':
-                    print(f"  🔥 PRIORITY: This is a CLOSED ticket - should contain actual resolution!")
-                    logger.info(f"🎫 PRIORITY: Analyzing CLOSED Jira ticket {jira_key} for actual resolution")
-                    jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query, all_search_results)
-                elif jira_key:
-                    print(f"  ⚠️  Secondary: This is an open ticket - may not have final resolution")
-                    logger.info(f"🎫 Secondary: Analyzing open Jira ticket {jira_key}")
-                    jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query, all_search_results)
-                else:
-                    print(f"  ❌ No JIRA key found in this result")
-                    jira_details = None
-                    if jira_details:
-                        detailed_solutions.append({
-                            'source': 'jira',
-                            'ticket': jira_key,
-                            'url': url,
-                            'solutions': jira_details.get('solutions', []),
-                            'comments': jira_details.get('comments', []),
-                            'llm_analysis': jira_details.get('llm_analysis', '')
-                        })
-                        
-                        # Add to all content for comprehensive LLM analysis
-                        all_extracted_content.append({
-                            'source': 'jira',
-                            'ticket': jira_key,
-                            'content': jira_details.get('full_content', ''),
-                            'analysis': jira_details.get('llm_analysis', '')
-                        })
-                
-                related_tickets.append({
-                    'title': result.get('title', ''),
-                    'url': url,
-                    'status': result.get('metadata', {}).get('status', 'Unknown'),
-                    'key': jira_key
-                })
-            
-            # Enhanced Slack analysis: Extract thread conversations for solutions with LLM analysis
-            elif platform == 'slack':
-                logger.info(f"💬 Deep-diving into Slack thread for comprehensive analysis")
-                slack_solutions = await self._extract_slack_thread_solutions_with_llm(result, query)
-                if slack_solutions:
-                    detailed_solutions.append({
-                        'source': 'slack',
-                        'channel': result.get('metadata', {}).get('channel', 'unknown'),
-                        'url': url,
-                        'solutions': slack_solutions.get('solutions', []),
-                        'thread_summary': slack_solutions.get('thread_summary', ''),
-                        'llm_analysis': slack_solutions.get('llm_analysis', '')
-                    })
-                    
-                    # Add to all content for comprehensive LLM analysis
-                    all_extracted_content.append({
-                        'source': 'slack',
-                        'channel': result.get('metadata', {}).get('channel', 'unknown'),
-                        'content': slack_solutions.get('full_thread_content', ''),
-                        'analysis': slack_solutions.get('llm_analysis', '')
-                    })
-                
-                # ENHANCED: Extract Jira tickets mentioned in Slack threads and fetch their details
-                thread_summary = result.get('metadata', {}).get('thread_summary', '')
-                if thread_summary and 'jira tickets mentioned:' in thread_summary.lower():
-                    logger.info(f"🎫 Found Jira ticket references in Slack thread: {thread_summary}")
-                    jira_tickets = self._extract_jira_tickets_from_slack_thread(thread_summary)
-                    
-                    for jira_key in jira_tickets:
-                        logger.info(f"🔍 Fetching Jira ticket {jira_key} mentioned in Slack thread")
-                        jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query, all_search_results)
-                        if jira_details:
-                            detailed_solutions.append({
-                                'source': 'jira',
-                                'ticket': jira_key,
-                                'url': f"https://acquia.atlassian.net/browse/{jira_key}",
-                                'solutions': jira_details.get('solutions', []),
-                                'comments': jira_details.get('comments', []),
-                                'llm_analysis': jira_details.get('llm_analysis', ''),
-                                'found_via': f'slack_thread_#{result.get("metadata", {}).get("channel", "unknown")}'
-                            })
-                            
-                            # Add to all content for comprehensive LLM analysis
-                            all_extracted_content.append({
-                                'source': 'jira_from_slack',
-                                'ticket': jira_key,
-                                'content': jira_details.get('full_content', ''),
-                                'analysis': jira_details.get('llm_analysis', ''),
-                                'found_via': f'slack_thread_#{result.get("metadata", {}).get("channel", "unknown")}'
-                            })
-                            
-                            # Also add to related_tickets for UI display
-                            related_tickets.append({
-                                'title': f"{jira_key}: {jira_details.get('comments', [{}])[0].get('body', 'Jira ticket from Slack thread')[:100]}...",
-                                'url': f"https://acquia.atlassian.net/browse/{jira_key}",
-                                'status': 'Referenced in Slack',
-                                'key': jira_key,
-                                'found_via': f'slack_thread_#{result.get("metadata", {}).get("channel", "unknown")}'
-                            })
-                
-                slack_discussions.append({
-                    'channel': result.get('metadata', {}).get('channel', 'unknown'),
-                    'content': result.get('content', '')[:200],
-                    'url': url,
-                    'thread_info': slack_solutions.get('thread_summary', '') if slack_solutions else ''
-                })
-            
-            # Enhanced Confluence analysis: Extract full page content for solutions with LLM analysis
-            elif platform == 'confluence':
-                logger.info(f"📄 Deep-diving into Confluence page for comprehensive analysis")
-                confluence_solutions = await self._extract_confluence_page_solutions_with_llm(result, query)
-                if confluence_solutions:
-                    detailed_solutions.append({
-                        'source': 'confluence',
-                        'page_title': result.get('title', ''),
-                        'url': url,
-                        'solutions': confluence_solutions.get('solutions', []),
-                        'full_content': confluence_solutions.get('content', ''),
-                        'llm_analysis': confluence_solutions.get('llm_analysis', '')
-                    })
-                    
-                    # Add to all content for comprehensive LLM analysis
-                    all_extracted_content.append({
-                        'source': 'confluence',
-                        'page_title': result.get('title', ''),
-                        'content': confluence_solutions.get('content', ''),
-                        'analysis': confluence_solutions.get('llm_analysis', '')
-                    })
-                
-                confluence_docs.append({
-                    'title': result.get('title', ''),
-                    'space': result.get('metadata', {}).get('space', ''),
-                    'url': url,
-                    'excerpt': result.get('content', '')[:200]
-                })
-            
-            # Look for technical keywords
+            # Add to technical context (for all results)  
             if any(tech_word in content for tech_word in ['sql', 'database', 'snowflake', 'javascript', 'oozie']):
                 technical_context.append({
                     'platform': platform,
@@ -1308,6 +1307,127 @@ Please provide a comprehensive analysis and summary of these search results.
                     'source': result.get('title', ''),
                     'url': url
                 })
+            
+            # Add to platform-specific collections (for all results)
+            if platform == 'jira':
+                jira_key = self._extract_jira_key_from_result(result)
+                related_tickets.append({
+                    'title': result.get('title', ''),
+                    'url': url,
+                    'status': result.get('metadata', {}).get('status', 'Unknown'),
+                    'key': jira_key
+                })
+            elif platform == 'slack':
+                slack_discussions.append({
+                    'channel': result.get('metadata', {}).get('channel', 'unknown'),
+                    'content': result.get('content', '')[:200],
+                    'url': url,
+                    'thread_info': ''  # No thread info without LLM analysis
+                })
+            elif platform == 'confluence':
+                confluence_docs.append({
+                    'title': result.get('title', ''),
+                    'space': result.get('metadata', {}).get('space', ''),
+                    'url': url,
+                    'excerpt': result.get('content', '')[:200]
+                })
+        
+        # 🚀 NOW PROCESS ONLY PRIORITY RESULTS WITH EXPENSIVE LLM ANALYSIS
+        print(f"\n🤖 LLM ANALYSIS PHASE (TOP {len(priority_results)} PRIORITY RESULTS):")
+        
+        for result in priority_results:
+            platform = result.get('platform', '')
+            url = result.get('url', '')
+            
+            print(f"\n💰 Processing {platform.upper()} result with LLM analysis...")
+            
+            # Enhanced Jira analysis: Extract comments for solutions with LLM analysis
+            if platform == 'jira':
+                jira_key = self._extract_jira_key_from_result(result)
+                ticket_status = result.get('metadata', {}).get('status', '').lower()
+                issue_type = result.get('metadata', {}).get('issue_type', '')
+                
+                print(f"  🎫 JIRA TICKET: {jira_key} - Status: {ticket_status}")
+                
+                if jira_key and ticket_status == 'closed':
+                    print(f"    🔥 PRIORITY: CLOSED ticket - analyzing for actual resolution!")
+                    jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query, all_search_results)
+                elif jira_key:
+                    print(f"    ⚠️ Secondary: Open ticket - may not have final resolution")
+                    jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query, all_search_results)
+                else:
+                    jira_details = None
+                
+                if jira_details:
+                    detailed_solutions.append({
+                        'source': 'jira',
+                        'ticket': jira_key,
+                        'url': url,
+                        'solutions': jira_details.get('solutions', []),
+                        'comments': jira_details.get('comments', []),
+                        'llm_analysis': jira_details.get('llm_analysis', '')
+                    })
+                    
+                    all_extracted_content.append({
+                        'source': 'jira',
+                        'ticket': jira_key,
+                        'content': jira_details.get('full_content', ''),
+                        'analysis': jira_details.get('llm_analysis', '')
+                    })
+            
+            # Enhanced Slack analysis: Extract thread conversations for solutions with LLM analysis
+            elif platform == 'slack':
+                channel = result.get('metadata', {}).get('channel', 'unknown')
+                print(f"  💬 SLACK THREAD: #{channel} - analyzing full thread conversation")
+                
+                slack_solutions = await self._extract_slack_thread_solutions_with_llm(result, query)
+                if slack_solutions:
+                    detailed_solutions.append({
+                        'source': 'slack',
+                        'channel': channel,
+                        'url': url,
+                        'solutions': slack_solutions.get('solutions', []),
+                        'thread_summary': slack_solutions.get('thread_summary', ''),
+                        'llm_analysis': slack_solutions.get('llm_analysis', '')
+                    })
+                    
+                    all_extracted_content.append({
+                        'source': 'slack',
+                        'channel': channel,
+                        'content': slack_solutions.get('full_thread_content', ''),
+                        'analysis': slack_solutions.get('llm_analysis', '')
+                    })
+            
+            # Enhanced Confluence analysis: Extract full page content for solutions with LLM analysis
+            elif platform == 'confluence':
+                page_title = result.get('title', 'Untitled')
+                print(f"  📄 CONFLUENCE PAGE: {page_title[:50]}... - analyzing full content")
+                
+                confluence_solutions = await self._extract_confluence_page_solutions_with_llm(result, query)
+                if confluence_solutions:
+                    detailed_solutions.append({
+                        'source': 'confluence',
+                        'page_title': page_title,
+                        'url': url,
+                        'solutions': confluence_solutions.get('solutions', []),
+                        'full_content': confluence_solutions.get('content', ''),
+                        'llm_analysis': confluence_solutions.get('llm_analysis', '')
+                    })
+                    
+                    all_extracted_content.append({
+                        'source': 'confluence',
+                        'page_title': page_title,
+                        'content': confluence_solutions.get('content', ''),
+                        'analysis': confluence_solutions.get('llm_analysis', '')
+                    })
+        
+        # Final optimization summary
+        print(f"\n💰 LLM API OPTIMIZATION SUMMARY:")
+        print(f"  📊 Total results processed: {len(results)}")
+        print(f"  🎯 Results with LLM analysis: {len(priority_results)}")
+        print(f"  💸 LLM calls made: {len(priority_results)} + 1 comprehensive = {len(priority_results) + 1}")
+        print(f"  🚫 LLM calls avoided: {len(results) - len(priority_results)}")
+        print(f"  💾 Cost savings: ~{((len(results) - len(priority_results)) / len(results) * 100):.0f}% API cost reduction")
         
         # Generate comprehensive LLM-powered solution analysis
         print(f"\n🚀 STARTING COMPREHENSIVE LLM ANALYSIS:")
