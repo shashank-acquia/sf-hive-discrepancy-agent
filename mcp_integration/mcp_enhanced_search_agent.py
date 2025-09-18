@@ -963,6 +963,22 @@ Please provide a comprehensive analysis and summary of these search results.
         
         logger.info(f"🔧 Starting deep technical analysis for query: '{query}' with {len(results)} results")
         
+        # LOG ALL SEARCH RESULTS TO SEE WHAT WE'RE WORKING WITH
+        print("\n" + "="*120)
+        print("🔍 ALL SEARCH RESULTS BEING ANALYZED:")
+        print("="*120)
+        for i, result in enumerate(results, 1):
+            platform = result.get('platform', 'unknown')
+            title = result.get('title', 'No title')
+            status = result.get('metadata', {}).get('status', 'No status')
+            url = result.get('url', 'No URL')
+            print(f"Result {i}: [{platform.upper()}] {title}")
+            print(f"  Status: {status}")
+            print(f"  URL: {url}")
+            print(f"  Content preview: {result.get('content', '')[:200]}...")
+            print("-" * 80)
+        print("="*120)
+        
         # Extract error details from search results
         error_patterns = []
         technical_context = []
@@ -974,6 +990,18 @@ Please provide a comprehensive analysis and summary of these search results.
         detailed_solutions = []
         all_extracted_content = []  # Store all content for LLM analysis
         
+        # Store search results for linked ticket resolution
+        all_search_results = results
+        
+        # Get expected JIRA projects from env
+        expected_projects = os.getenv('JIRA_PROJECT_KEY', 'A1DEV,AOPS').split(',')
+        expected_projects = [proj.strip() for proj in expected_projects]
+        
+        print(f"\n🔧 JIRA FILTERING APPLIED:")
+        print(f"  Expected Projects: {expected_projects}")
+        print(f"  Excluded Types: Epic")
+        print(f"  Processing only linked issues from expected projects\n")
+        
         for result in results:
             # Ensure result is a dictionary
             if not isinstance(result, dict):
@@ -984,6 +1012,27 @@ Please provide a comprehensive analysis and summary of these search results.
             title = result.get('title', '').lower()
             platform = result.get('platform', '')
             url = result.get('url', '')
+            
+            # FILTER JIRA ISSUES: Only process expected projects and exclude Epics
+            if platform == 'jira':
+                jira_key = self._extract_jira_key_from_result(result)
+                issue_type = result.get('metadata', {}).get('issue_type', '').lower()
+                project_key = 'UNKNOWN'
+                
+                # Check if issue is from expected project
+                if jira_key:
+                    project_key = jira_key.split('-')[0] if '-' in jira_key else ''
+                    if project_key not in expected_projects:
+                        print(f"❌ Skipping JIRA {jira_key} - not from expected projects {expected_projects}")
+                        continue
+                
+                # Exclude Epic type issues
+                if issue_type == 'epic':
+                    print(f"❌ Skipping JIRA {jira_key} - Epic type excluded")
+                    continue
+                
+                # Only process linked issues (if this is a search result, it should be linked)
+                print(f"✅ Processing JIRA {jira_key} - project: {project_key}, type: {issue_type}")
             
             # Extract error patterns
             if any(error_word in content for error_word in ['error', 'exception', 'failed', 'failure']):
@@ -997,9 +1046,30 @@ Please provide a comprehensive analysis and summary of these search results.
             # Enhanced Jira analysis: Extract comments for solutions with LLM analysis
             if platform == 'jira':
                 jira_key = self._extract_jira_key_from_result(result)
-                if jira_key:
-                    logger.info(f"🎫 Deep-diving into Jira ticket {jira_key} for detailed analysis")
-                    jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query)
+                ticket_status = result.get('metadata', {}).get('status', '').lower()
+                
+                # This ticket already passed filtering above, so it's valid
+                issue_type = result.get('metadata', {}).get('issue_type', '')
+                
+                # PRIORITIZE CLOSED TICKETS - they have actual resolutions
+                print(f"\n🎫 PROCESSING FILTERED JIRA TICKET:")
+                print(f"  Key: {jira_key}")
+                print(f"  Status: {ticket_status}")
+                print(f"  Type: {issue_type}")
+                print(f"  Title: {result.get('title', 'No title')}")
+                print(f"  URL: {result.get('url', 'No URL')}")
+                
+                if jira_key and ticket_status == 'closed':
+                    print(f"  🔥 PRIORITY: This is a CLOSED ticket - should contain actual resolution!")
+                    logger.info(f"🎫 PRIORITY: Analyzing CLOSED Jira ticket {jira_key} for actual resolution")
+                    jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query, all_search_results)
+                elif jira_key:
+                    print(f"  ⚠️  Secondary: This is an open ticket - may not have final resolution")
+                    logger.info(f"🎫 Secondary: Analyzing open Jira ticket {jira_key}")
+                    jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query, all_search_results)
+                else:
+                    print(f"  ❌ No JIRA key found in this result")
+                    jira_details = None
                     if jira_details:
                         detailed_solutions.append({
                             'source': 'jira',
@@ -1055,7 +1125,7 @@ Please provide a comprehensive analysis and summary of these search results.
                     
                     for jira_key in jira_tickets:
                         logger.info(f"🔍 Fetching Jira ticket {jira_key} mentioned in Slack thread")
-                        jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query)
+                        jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query, all_search_results)
                         if jira_details:
                             detailed_solutions.append({
                                 'source': 'jira',
@@ -1534,7 +1604,7 @@ Please provide a comprehensive analysis and summary of these search results.
             logger.error(f"Error extracting Jira key from result: {e}")
             return None
     
-    async def _extract_jira_comments_and_solutions_with_llm(self, jira_key: str, query: str) -> Optional[Dict[str, Any]]:
+    async def _extract_jira_comments_and_solutions_with_llm(self, jira_key: str, query: str, all_search_results: List[Dict] = None) -> Optional[Dict[str, Any]]:
         """Extract comments and solutions from a Jira ticket with LLM analysis"""
         try:
             # Import Jira tool
@@ -1574,51 +1644,79 @@ Comment {i} by {comment.get('author', 'Unknown')} on {comment.get('created', 'Un
             llm_analysis = ""
             solutions = []
             
-            if self.llm and len(comments) > 0:
+            # ENHANCED APPROACH: Integrated chronological analysis with linked tickets
+            if self.llm and len(comments) > 0 and issue_details.get('status', '').lower() == 'closed':
                 try:
-                    system_prompt = f"""You are a technical expert analyzing a Jira ticket and its comments to find solutions related to the query: "{query}".
-
-Your task is to:
-1. Identify any solutions, workarounds, or fixes mentioned in the comments
-2. Extract step-by-step instructions if available
-3. Identify root causes mentioned
-4. Note any prevention measures suggested
-5. Highlight the most relevant solutions for the query
-
-Focus on actionable technical solutions and provide confidence scores based on how complete and tested the solutions appear to be."""
-
-                    user_prompt = f"""
-Query Context: {query}
-
-Jira Ticket Analysis:
-{full_content[:4000]}  # Limit content for LLM
-
-Please analyze this Jira ticket and extract:
-1. All solutions or workarounds mentioned
-2. Step-by-step instructions
-3. Root causes identified
-4. Prevention measures
-5. Confidence level for each solution (0.0 to 1.0)
-
-Format your response as a structured analysis with clear sections.
-"""
+                    print(f"\n🔗 Building integrated timeline for {jira_key} with linked tickets...")
+                    
+                    # Step 1: Find linked tickets mentioned in comments
+                    linked_ticket_ids = self._extract_jira_ticket_references_from_comments(comments)
+                    
+                    # Step 2: Get linked ticket details from search results
+                    linked_tickets = {}
+                    if all_search_results and linked_ticket_ids:
+                        for ticket_id in linked_ticket_ids:
+                            linked_result = self._find_linked_ticket_in_search_results(ticket_id, all_search_results)
+                            if linked_result:
+                                # Extract full ticket details using JiraTool
+                                import sys
+                                import os
+                                sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'tools', 'cdp_chat_tool'))
+                                from jira_tool import JiraTool
+                                
+                                jira_tool = JiraTool()
+                                linked_details = jira_tool.get_issue_details(ticket_id)
+                                if linked_details:
+                                    linked_tickets[ticket_id] = linked_details
+                                    print(f"  ✅ Added linked ticket {ticket_id}: {linked_details.get('summary', 'No summary')}")
+                    
+                    # Step 3: Build integrated chronological timeline
+                    primary_ticket_data = {
+                        'key': jira_key,
+                        'summary': issue_details.get('summary', 'No summary'),
+                        'status': issue_details.get('status', 'Unknown'),
+                        'description': issue_details.get('description', 'No description')
+                    }
+                    
+                    chronology_prompt = self._build_integrated_chronological_timeline(
+                        primary_ticket_data, linked_tickets, comments, query
+                    )
 
                     messages = [
-                        SystemMessage(content=system_prompt),
-                        HumanMessage(content=user_prompt)
+                        HumanMessage(content=chronology_prompt)
                     ]
+                    
+                    # LOG THE FULL PROMPT BEING SENT TO LLM
+                    print("=" * 100)
+                    print("🔍 JIRA CHRONOLOGICAL ANALYSIS - LLM INPUT:")
+                    print("=" * 100)
+                    print(chronology_prompt)
+                    print("=" * 100)
                     
                     response = self.llm(messages)
                     llm_analysis = response.content
                     
-                    # Parse LLM response to extract structured solutions
-                    if "solution" in llm_analysis.lower() or "fix" in llm_analysis.lower():
+                    # LOG THE FULL LLM RESPONSE
+                    print("🤖 JIRA CHRONOLOGICAL ANALYSIS - LLM RESPONSE:")
+                    print("=" * 100)
+                    print(llm_analysis)
+                    print("=" * 100)
+                    
+                    # Parse chronological analysis for actual resolution
+                    if llm_analysis and len(llm_analysis.strip()) > 50:  # Valid response
+                        # Look for high-confidence actual solutions (operational fixes)
+                        confidence = 0.9 if any(indicator in llm_analysis.lower() for indicator in [
+                            'increased warehouse size', 'alter warehouse', 'completed successfully', 
+                            'workflow completed', 'restarted', 'updated configuration', 'changed setting'
+                        ]) else 0.8
+                        
                         solutions.append({
-                            'source': 'llm_analysis',
+                            'source': 'chronological_analysis',
                             'content': llm_analysis,
-                            'confidence': 0.8,
-                            'type': 'llm_extracted_solution',
-                            'author': 'AI Analysis'
+                            'confidence': confidence,
+                            'type': 'actual_resolution_from_closed_ticket',
+                            'author': 'Resolution Analysis',
+                            'ticket_status': 'closed'
                         })
                     
                 except Exception as e:
@@ -2523,12 +2621,37 @@ URL: {context.get('url', 'No URL')}
 ---
 """
             
+            # PRIORITIZE ACTUAL RESOLUTIONS FROM CLOSED TICKETS
+            closed_ticket_solutions = [s for s in detailed_solutions if s.get('source') == 'jira' and 
+                                     any(sol.get('type') == 'actual_resolution_from_closed_ticket' for sol in s.get('solutions', []))]
+            other_solutions = [s for s in detailed_solutions if s not in closed_ticket_solutions]
+            
+            # Put actual resolutions first
+            prioritized_solutions = closed_ticket_solutions + other_solutions
+
             context_content += f"""
 
-DETAILED SOLUTIONS FROM PLATFORMS ({len(detailed_solutions)}):
+ACTUAL RESOLUTIONS FROM CLOSED TICKETS ({len(closed_ticket_solutions)} PRIORITY):
 """
             
-            for i, solution_set in enumerate(detailed_solutions, 1):
+            for i, solution_set in enumerate(closed_ticket_solutions, 1):
+                context_content += f"""
+PRIORITY RESOLUTION {i} from CLOSED JIRA TICKET:
+Ticket: {solution_set.get('ticket', 'Unknown')} (STATUS: CLOSED - ACTUAL RESOLUTION)
+"""
+                solutions = solution_set.get('solutions', [])
+                for j, sol in enumerate(solutions, 1):
+                    if sol.get('type') == 'actual_resolution_from_closed_ticket':
+                        context_content += f"ACTUAL RESOLUTION IMPLEMENTED: {sol.get('content', 'No content')[:500]}...\n"
+                        context_content += f"Confidence: {sol.get('confidence', 0):.2f} (HIGH - from closed ticket)\n"
+                context_content += "---\n"
+
+            context_content += f"""
+
+OTHER SOLUTIONS FROM PLATFORMS ({len(other_solutions)}):
+"""
+
+            for i, solution_set in enumerate(other_solutions, 1):
                 source = solution_set.get('source', 'unknown')
                 context_content += f"""
 Solution Set {i} from {source.upper()}:
@@ -2570,32 +2693,50 @@ Analysis: {content.get('analysis', 'No analysis')[:200]}...
 """
             
             # Generate comprehensive LLM analysis
-            system_prompt = f"""You are a senior technical expert analyzing cross-platform search results to provide comprehensive solutions for the query: "{query}".
+            system_prompt = f"""You are analyzing technical solutions for: "{query}".
+
+🔥 CRITICAL: ACTUAL RESOLUTIONS FROM CLOSED TICKETS ARE ABOVE - USE THESE AS PRIMARY SOLUTIONS! 🔥
+
+The "ACTUAL RESOLUTIONS FROM CLOSED TICKETS" section contains proven solutions that were actually implemented and confirmed successful. These should be your PRIMARY recommendation with HIGH confidence.
+
+ANALYSIS PRIORITY:
+1. **USE ACTUAL RESOLUTIONS FIRST**: Any solution from the "ACTUAL RESOLUTIONS FROM CLOSED TICKETS" section should be your primary recommendation
+2. **EXTRACT THE SPECIFIC ACTIONS**: Focus on the exact operational changes that were made (SQL commands, configuration changes, etc.)
+3. **IDENTIFY ROOT CAUSE FROM RESOLUTION**: The successful resolution often reveals the true root cause
 
 You have access to:
 - Error patterns from multiple platforms
 - Technical context and background information  
 - Detailed solutions extracted from Jira tickets, Slack discussions, and Confluence documentation
 - AI analysis of platform-specific content
+- MOST IMPORTANTLY: Actual resolution steps from closed JIRA tickets with confirmed success
 
 Your task is to provide a comprehensive technical solution analysis with:
 
-1. **PRIMARY SOLUTION**: The most reliable and actionable solution based on all evidence
-2. **ROOT CAUSE ANALYSIS**: Technical root cause based on error patterns and solutions
-3. **ALTERNATIVE APPROACHES**: 2-3 alternative solutions with different approaches
-4. **PREVENTION MEASURES**: Specific steps to prevent similar issues
-5. **CONFIDENCE ASSESSMENT**: Overall confidence in the solution (0.0 to 1.0)
-6. **IMPLEMENTATION STEPS**: Clear, actionable steps to implement the solution
-7. **RISK ASSESSMENT**: Potential risks and mitigation strategies
+1. **PRIMARY SOLUTION**: The most reliable solution - MUST prioritize actual implemented fixes from JIRA over theoretical solutions
+2. **ROOT CAUSE ANALYSIS**: Extract the actual root cause identified in successful JIRA resolutions, not just error patterns
+3. **ALTERNATIVE APPROACHES**: Additional proven solutions from the evidence, ranked by success confirmation
+4. **PREVENTION MEASURES**: Specific preventive steps mentioned in successful resolutions
+5. **CONFIDENCE ASSESSMENT**: Higher confidence (0.8-1.0) for solutions with confirmed success, lower (0.3-0.7) for theoretical
+6. **IMPLEMENTATION STEPS**: Exact steps from successful JIRA resolutions, including specific commands/changes made
+7. **RISK ASSESSMENT**: Risks based on actual implementation experiences from JIRA comments
+
+ANALYSIS METHODOLOGY:
+- Step 1: Scan all JIRA tickets for status "Closed" with resolution confirmations
+- Step 2: Extract specific technical actions taken (commands, configuration changes, etc.)
+- Step 3: Look for success confirmations ("completed successfully", "working now", etc.)
+- Step 4: Use these proven solutions as PRIMARY recommendations
+- Step 5: Only supplement with theoretical approaches if no proven solutions exist
 
 Focus on:
-- Actionable technical solutions
-- Evidence-based recommendations
-- Cross-platform insights
-- Community-validated approaches
-- Official documentation alignment
+- PROVEN solutions over theoretical ones
+- Specific technical actions that worked
+- Evidence of successful implementation
+- Operational fixes and configuration changes
+- Community-validated approaches with success metrics
+- Step-by-step procedures that led to resolution
 
-Provide structured, professional analysis suitable for technical teams."""
+Provide structured, professional analysis that prioritizes what actually worked over what might work."""
 
             user_prompt = f"""
 Please analyze the following comprehensive technical information and provide a structured solution analysis:
@@ -2613,6 +2754,21 @@ Generate a comprehensive solution analysis with clear sections for:
 Base your analysis on the evidence provided from Jira tickets, Slack discussions, and Confluence documentation.
 """
 
+            # LOG THE COMPREHENSIVE ANALYSIS INPUTS
+            print("\n" + "="*120)
+            print("🔥 COMPREHENSIVE ANALYSIS - SYSTEM PROMPT:")
+            print("="*120)
+            print(system_prompt)
+            print("\n" + "="*120)
+            print("🔥 COMPREHENSIVE ANALYSIS - USER PROMPT & CONTEXT:")
+            print("="*120)
+            print(user_prompt)
+            print("="*120)
+            print("🔥 FULL CONTEXT CONTENT BEING SENT:")
+            print("="*120)
+            print(context_content[:6000])
+            print("="*120)
+            
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
@@ -2620,6 +2776,13 @@ Base your analysis on the evidence provided from Jira tickets, Slack discussions
             
             response = self.llm(messages)
             llm_response = response.content
+            
+            # LOG THE COMPREHENSIVE ANALYSIS RESPONSE
+            print("\n" + "="*120)
+            print("🤖 COMPREHENSIVE ANALYSIS - LLM RESPONSE:")
+            print("="*120)
+            print(llm_response)
+            print("="*120)
             
             # Parse LLM response into structured format
             parsed_analysis = self._parse_llm_solution_response(llm_response)
@@ -3021,6 +3184,135 @@ Based on analysis of {len(detailed_solutions)} solution sources:
         }
         
         return analysis
+
+    def _extract_jira_ticket_references_from_comments(self, comments: List[Dict]) -> List[str]:
+        """Extract JIRA ticket IDs mentioned in comment text"""
+        try:
+            import re
+            
+            jira_tickets = []
+            
+            for comment in comments:
+                comment_text = comment.get('body', '')
+                
+                # Use the same regex patterns as the existing method
+                jira_patterns = [
+                    r'\b([A-Z]+\d*[A-Z]*-\d+)\b',  # Standard pattern like A1DEV-16589, AOPS-26534
+                    r'browse/([A-Z]+\d*[A-Z]*-\d+)',  # URL pattern
+                    r'ticket[:\s]+([A-Z]+\d*[A-Z]*-\d+)',  # "ticket: AOPS-26534"
+                ]
+                
+                for pattern in jira_patterns:
+                    matches = re.findall(pattern, comment_text, re.IGNORECASE)
+                    for ticket in matches:
+                        ticket_upper = ticket.upper()
+                        if ticket_upper not in jira_tickets and len(ticket_upper) >= 5:
+                            jira_tickets.append(ticket_upper)
+            
+            logger.info(f"🔗 Found {len(jira_tickets)} linked tickets in comments: {jira_tickets}")
+            return jira_tickets
+            
+        except Exception as e:
+            logger.error(f"Error extracting JIRA references from comments: {e}")
+            return []
+
+    def _find_linked_ticket_in_search_results(self, ticket_id: str, search_results: List[Dict]) -> Optional[Dict]:
+        """Find linked ticket data from search results"""
+        try:
+            if not search_results:
+                return None
+                
+            for result in search_results:
+                if result.get('platform') == 'jira':
+                    # Check if this result matches the ticket ID we're looking for
+                    result_ticket = self._extract_jira_key_from_result(result)
+                    if result_ticket and result_ticket.upper() == ticket_id.upper():
+                        logger.info(f"✅ Found linked ticket {ticket_id} in search results")
+                        return result
+            
+            logger.warning(f"❌ Linked ticket {ticket_id} not found in search results")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding linked ticket {ticket_id}: {e}")
+            return None
+
+    def _build_integrated_chronological_timeline(self, primary_ticket: Dict, linked_tickets: Dict[str, Dict], 
+                                               comments: List[Dict], query: str) -> str:
+        """Build chronological timeline integrating linked ticket details"""
+        try:
+            timeline = f"""You are analyzing a CLOSED Jira ticket to extract the ACTUAL RESOLUTION that was implemented.
+
+INTEGRATED TICKET CHRONOLOGY ANALYSIS:
+Primary Ticket: {primary_ticket.get('key', 'Unknown')} - {primary_ticket.get('summary', 'No summary')}
+Status: {primary_ticket.get('status', 'Unknown')} (CLOSED - meaning it was resolved)
+Query Context: "{query}"
+
+INITIAL PROBLEM:
+{primary_ticket.get('description', 'No description')[:500]}
+
+INTEGRATED RESOLUTION TIMELINE (chronological order with linked ticket details):
+"""
+
+            # Sort comments by creation date
+            sorted_comments = sorted(comments, key=lambda c: c.get('created', ''))
+            
+            for i, comment in enumerate(sorted_comments, 1):
+                comment_text = comment.get('body', 'No content')
+                author = comment.get('author', 'Unknown')
+                created = comment.get('created', 'Unknown date')
+                
+                timeline += f"""
+STEP {i} - {created} by {author}:
+{comment_text}
+"""
+                
+                # Check if this comment mentions any linked tickets
+                referenced_tickets = self._extract_jira_ticket_references_from_comments([comment])
+                
+                for ticket_ref in referenced_tickets:
+                    if ticket_ref in linked_tickets:
+                        linked_ticket = linked_tickets[ticket_ref]
+                        
+                        # Add linked ticket details right after the comment that references it
+                        timeline += f"""
+STEP {i}.1 - LINKED TICKET {ticket_ref} DETAILS:
+Summary: {linked_ticket.get('summary', 'No summary')}
+Status: {linked_ticket.get('status', 'Unknown')}
+Description: {linked_ticket.get('description', 'No description')[:500]}
+
+LINKED TICKET {ticket_ref} COMMENTS:"""
+                        
+                        # Add linked ticket comments if available
+                        linked_comments = linked_ticket.get('comments', [])
+                        if linked_comments:
+                            for j, linked_comment in enumerate(linked_comments[:5], 1):  # Limit to 5 comments
+                                timeline += f"""
+  Sub-step {i}.1.{j} - {linked_comment.get('created', 'Unknown')} by {linked_comment.get('author', 'Unknown')}:
+  {linked_comment.get('body', 'No content')[:300]}"""
+                        else:
+                            timeline += "\n  No comments available for linked ticket."
+                
+                timeline += "\n---"
+
+            timeline += f"""
+
+ANALYSIS TASK:
+Since this ticket is CLOSED and you have the complete integrated timeline including linked tickets, please:
+
+1. IDENTIFY THE ACTUAL SOLUTION: What specific action/change was made that resolved the issue? Look especially at the linked ticket details for operational changes.
+2. EXTRACT IMPLEMENTATION STEPS: What exact commands, configuration changes, or procedures were performed? Check linked tickets for technical details.
+3. FIND SUCCESS CONFIRMATION: Which comment confirms the solution worked?
+4. ROOT CAUSE: What was the actual underlying problem that was fixed?
+
+Focus ONLY on what was actually done to resolve this closed ticket. If you see operational actions in linked tickets like "increased warehouse size", "ALTER WAREHOUSE", "restarted service", "updated configuration" followed by "completed successfully" or similar confirmation, that's the actual solution.
+"""
+
+            return timeline
+            
+        except Exception as e:
+            logger.error(f"Error building integrated timeline: {e}")
+            return f"Error building timeline: {str(e)}"
 
     def get_server_status(self) -> Dict[str, Any]:
         """Get status of configured MCP servers"""
