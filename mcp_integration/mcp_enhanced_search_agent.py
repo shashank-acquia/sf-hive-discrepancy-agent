@@ -902,6 +902,247 @@ Please provide a comprehensive analysis and summary of these search results.
         else:
             return 'general'
     
+    async def _get_slack_thread_messages_direct(self, slack_tool, channel_id: str, thread_ts: str) -> List[Dict[str, Any]]:
+        """
+        Get thread messages directly using Slack SDK with channel_id and parent thread timestamp
+        """
+        try:
+            print(f"  🔧 Direct Slack API call:")
+            print(f"    Method: conversations_replies")
+            print(f"    Channel ID: '{channel_id}'")
+            print(f"    Thread TS: '{thread_ts}'")
+            
+            # Use the Slack client directly to get thread replies
+            if hasattr(slack_tool, 'client') and slack_tool.client:
+                response = slack_tool.client.conversations_replies(
+                    channel=channel_id,
+                    ts=thread_ts,
+                    inclusive=True  # Include the parent message
+                )
+                
+                print(f"    API Response OK: {response.get('ok', False)}")
+                
+                if response.get('ok'):
+                    messages = response.get('messages', [])
+                    print(f"    ✅ SUCCESS: Retrieved {len(messages)} messages in thread")
+                    
+                    # Log thread structure
+                    for i, msg in enumerate(messages, 1):
+                        user = msg.get('user', 'Unknown')
+                        ts = msg.get('ts', '')
+                        text = msg.get('text', '')[:100]
+                        thread_ts_field = msg.get('thread_ts', '')
+                        
+                        print(f"      Message {i}: {user} at {ts}")
+                        print(f"        Thread TS: {thread_ts_field}")
+                        print(f"        Text: {text}...")
+                    
+                    return messages
+                else:
+                    error = response.get('error', 'Unknown error')
+                    print(f"    ❌ API Error: {error}")
+                    return []
+            else:
+                print(f"    ❌ Slack client not available")
+                return []
+                
+        except Exception as e:
+            print(f"    🚨 EXCEPTION in direct API call: {e}")
+            return []
+
+    def _parse_slack_url_for_thread_info(self, url: str) -> Optional[Dict[str, str]]:
+        """
+        Parse Slack URL to extract channel_id and parent thread timestamp
+        
+        URL formats:
+        Parent: https://acquia.slack.com/archives/C012J3T0S9H/p1757099567133569
+        Reply:  https://acquia.slack.com/archives/C012J3T0S9H/p1757099567133569?thread_ts=1757099501.569169&cid=C012J3T0S9H
+        
+        Returns: {channel_id: str, thread_ts: str} or None if parsing fails
+        """
+        try:
+            print(f"\n🔗 PARSING SLACK URL FOR THREAD INFO:")
+            print(f"  Input URL: {url}")
+            
+            if not url or '/archives/' not in url:
+                print(f"  ❌ Invalid URL format - missing /archives/")
+                return None
+            
+            # Extract channel_id from /archives/{channel_id}/
+            url_parts = url.split('/archives/')
+            if len(url_parts) < 2:
+                print(f"  ❌ Could not split URL on /archives/")
+                return None
+                
+            after_archives = url_parts[1]  # e.g., "C012J3T0S9H/p1757099567133569?thread_ts=1757099501.569169"
+            channel_id = after_archives.split('/')[0]  # e.g., "C012J3T0S9H"
+            
+            print(f"  📍 Extracted channel_id: '{channel_id}'")
+            
+            # Extract thread_ts from URL parameters
+            if 'thread_ts=' in url:
+                # This is a reply URL, extract the parent thread timestamp
+                thread_ts = url.split('thread_ts=')[1].split('&')[0]
+                print(f"  🧵 Found thread_ts parameter: '{thread_ts}' (this is the parent)")
+            else:
+                # This is the parent message URL, extract timestamp from p{timestamp}
+                if '/p' not in url:
+                    print(f"  ❌ No /p timestamp found in URL")
+                    return None
+                    
+                timestamp_part = url.split('/p')[1].split('?')[0]  # e.g., "1757099567133569"
+                if not timestamp_part.isdigit() or len(timestamp_part) < 10:
+                    print(f"  ❌ Invalid timestamp format: '{timestamp_part}'")
+                    return None
+                    
+                # Convert p{timestamp} format to proper timestamp (add decimal point)
+                thread_ts = timestamp_part[:10] + '.' + timestamp_part[10:]
+                print(f"  🎯 This is parent URL, converted timestamp: '{thread_ts}'")
+            
+            result = {
+                'channel_id': channel_id,
+                'thread_ts': thread_ts
+            }
+            
+            print(f"  ✅ SUCCESS: Parsed URL info: {result}")
+            return result
+            
+        except Exception as e:
+            print(f"  🚨 EXCEPTION parsing Slack URL: {e}")
+            return None
+
+    def _sort_jira_results_by_priority(self, jira_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Sort Jira results by priority: Closed > High Priority > Recent"""
+        def jira_priority_score(result):
+            score = 0
+            status = result.get('metadata', {}).get('status', '').lower()
+            priority = result.get('metadata', {}).get('priority', '').lower()
+            
+            # Closed tickets get highest priority (actual resolutions)
+            if status == 'closed':
+                score += 100
+            elif status == 'resolved':
+                score += 80
+            
+            # High priority issues
+            if priority in ['critical', 'high']:
+                score += 50
+            elif priority == 'medium':
+                score += 25
+            
+            # Relevance score from search
+            relevance = result.get('relevance_score', 0)
+            score += relevance * 10
+            
+            return score
+        
+        return sorted(jira_results, key=jira_priority_score, reverse=True)
+    
+    def _sort_slack_results_by_relevance(self, slack_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Sort Slack results by relevance: High scores > Reply count > Recent"""
+        def slack_priority_score(result):
+            score = 0
+            
+            # Search relevance score (normalized)
+            relevance = result.get('relevance_score', 0)
+            score += relevance * 100
+            
+            # Number of replies (more discussion = more likely to have solutions)
+            reply_count = result.get('metadata', {}).get('reply_count', 0)
+            score += min(reply_count * 5, 50)  # Cap at 50 points
+            
+            # Slack search score
+            slack_score = result.get('metadata', {}).get('score', 0)
+            if slack_score > 0:
+                # Normalize Slack score (they can be in thousands)
+                normalized_slack_score = min(slack_score / 1000, 20)
+                score += normalized_slack_score
+            
+            return score
+        
+        return sorted(slack_results, key=slack_priority_score, reverse=True)
+    
+    def _sort_confluence_results_by_relevance(self, confluence_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Sort Confluence results by relevance: Recent > High relevance > Space priority"""
+        def confluence_priority_score(result):
+            score = 0
+            
+            # Search relevance score
+            relevance = result.get('relevance_score', 0)
+            score += relevance * 100
+            
+            # Recent updates (check last_modified)
+            last_modified = result.get('metadata', {}).get('last_modified', '')
+            if '2024' in str(last_modified):
+                score += 30
+            elif '2023' in str(last_modified):
+                score += 15
+            
+            # Space priority (some spaces might be more important)
+            space = result.get('metadata', {}).get('space', '').lower()
+            if any(priority_word in space for priority_word in ['engineering', 'dev', 'docs', 'kb']):
+                score += 20
+            
+            return score
+        
+        return sorted(confluence_results, key=confluence_priority_score, reverse=True)
+    
+    def _filter_top_results_per_platform(self, results: List[Dict[str, Any]], max_per_platform: int = 3) -> Dict[str, List[Dict[str, Any]]]:
+        """Group results by platform and return top N results per platform for LLM analysis"""
+        
+        # Group results by platform
+        jira_results = [r for r in results if r.get('platform') == 'jira']
+        slack_results = [r for r in results if r.get('platform') == 'slack']
+        confluence_results = [r for r in results if r.get('platform') == 'confluence']
+        other_results = [r for r in results if r.get('platform') not in ['jira', 'slack', 'confluence']]
+        
+        print(f"\n📊 PLATFORM RESULT DISTRIBUTION:")
+        print(f"  📋 Jira results: {len(jira_results)}")
+        print(f"  💬 Slack results: {len(slack_results)}")
+        print(f"  📄 Confluence results: {len(confluence_results)}")
+        print(f"  🔧 Other results: {len(other_results)}")
+        
+        # Sort each platform by priority
+        jira_sorted = self._sort_jira_results_by_priority(jira_results)
+        slack_sorted = self._sort_slack_results_by_relevance(slack_results)
+        confluence_sorted = self._sort_confluence_results_by_relevance(confluence_results)
+        
+        # Take top N from each platform
+        top_jira = jira_sorted[:max_per_platform]
+        top_slack = slack_sorted[:max_per_platform]
+        top_confluence = confluence_sorted[:max_per_platform]
+        
+        print(f"\n🎯 SELECTED FOR LLM ANALYSIS (TOP {max_per_platform} PER PLATFORM):")
+        print(f"  📋 Jira tickets selected: {len(top_jira)}")
+        for i, result in enumerate(top_jira, 1):
+            jira_key = self._extract_jira_key_from_result(result)
+            status = result.get('metadata', {}).get('status', 'Unknown')
+            priority = result.get('metadata', {}).get('priority', 'Unknown')
+            print(f"    {i}. {jira_key} - Status: {status}, Priority: {priority}")
+        
+        print(f"  💬 Slack threads selected: {len(top_slack)}")
+        for i, result in enumerate(top_slack, 1):
+            channel = result.get('metadata', {}).get('channel', 'unknown')
+            score = result.get('metadata', {}).get('score', 0)
+            replies = result.get('metadata', {}).get('reply_count', 0)
+            print(f"    {i}. #{channel} - Score: {score:.0f}, Replies: {replies}")
+        
+        print(f"  📄 Confluence pages selected: {len(top_confluence)}")
+        for i, result in enumerate(top_confluence, 1):
+            title = result.get('title', 'Untitled')[:50]
+            space = result.get('metadata', {}).get('space', 'Unknown')
+            print(f"    {i}. {title}... - Space: {space}")
+        
+        # Return categorized results
+        return {
+            'priority_for_llm': top_jira + top_slack + top_confluence,
+            'remaining_jira': jira_sorted[max_per_platform:],
+            'remaining_slack': slack_sorted[max_per_platform:],
+            'remaining_confluence': confluence_sorted[max_per_platform:],
+            'other_results': other_results,
+            'all_results': results
+        }
+
     def _generate_llm_context_from_insights(self, platform_insights: Dict[str, Any], query: str, context: Optional[Dict]) -> str:
         """Generate structured context for LLM to improve suggestions"""
         llm_context_parts = [
@@ -963,6 +1204,22 @@ Please provide a comprehensive analysis and summary of these search results.
         
         logger.info(f"🔧 Starting deep technical analysis for query: '{query}' with {len(results)} results")
         
+        # LOG ALL SEARCH RESULTS TO SEE WHAT WE'RE WORKING WITH
+        print("\n" + "="*120)
+        print("🔍 ALL SEARCH RESULTS BEING ANALYZED:")
+        print("="*120)
+        for i, result in enumerate(results, 1):
+            platform = result.get('platform', 'unknown')
+            title = result.get('title', 'No title')
+            status = result.get('metadata', {}).get('status', 'No status')
+            url = result.get('url', 'No URL')
+            print(f"Result {i}: [{platform.upper()}] {title}")
+            print(f"  Status: {status}")
+            print(f"  URL: {url}")
+            print(f"  Content preview: {result.get('content', '')[:200]}...")
+            print("-" * 80)
+        print("="*120)
+        
         # Extract error details from search results
         error_patterns = []
         technical_context = []
@@ -974,6 +1231,38 @@ Please provide a comprehensive analysis and summary of these search results.
         detailed_solutions = []
         all_extracted_content = []  # Store all content for LLM analysis
         
+        # Store search results for linked ticket resolution
+        all_search_results = results
+        
+        # Get expected JIRA projects from env
+        expected_projects = os.getenv('JIRA_PROJECT_KEY', 'A1DEV,AOPS').split(',')
+        expected_projects = [proj.strip() for proj in expected_projects]
+        
+        print(f"\n🔧 JIRA FILTERING APPLIED:")
+        print(f"  Expected Projects: {expected_projects}")
+        print(f"  Excluded Types: Epic")
+        print(f"  Processing only linked issues from expected projects\n")
+        
+        # 🚀 OPTIMIZATION: Filter to top 3 results per platform for LLM analysis
+        print(f"💰 LLM API CALL OPTIMIZATION:")
+        print(f"  Original results: {len(results)} total")
+        print(f"  Limiting to top 3 per platform (Jira, Slack, Confluence) for expensive LLM analysis")
+        
+        filtered_results = self._filter_top_results_per_platform(results, max_per_platform=3)
+        priority_results = filtered_results['priority_for_llm']  # Max 9 results for LLM
+        remaining_results = (filtered_results['remaining_jira'] + 
+                           filtered_results['remaining_slack'] + 
+                           filtered_results['remaining_confluence'] + 
+                           filtered_results['other_results'])
+        
+        print(f"\n🎯 LLM ANALYSIS PLAN:")
+        print(f"  Priority results (with LLM): {len(priority_results)} results")
+        print(f"  Remaining results (basic processing): {len(remaining_results)} results")
+        print(f"  Expected LLM API calls: {len(priority_results)} + 1 comprehensive = {len(priority_results) + 1} total")
+        print(f"  💸 Cost savings: ~{len(results) - len(priority_results)} LLM calls avoided!")
+        
+        # Process ALL results for basic information (error patterns, technical context)
+        print(f"\n📊 BASIC PROCESSING (ALL {len(results)} RESULTS):")
         for result in results:
             # Ensure result is a dictionary
             if not isinstance(result, dict):
@@ -985,7 +1274,23 @@ Please provide a comprehensive analysis and summary of these search results.
             platform = result.get('platform', '')
             url = result.get('url', '')
             
-            # Extract error patterns
+            # FILTER JIRA ISSUES: Only process expected projects and exclude Epics
+            if platform == 'jira':
+                jira_key = self._extract_jira_key_from_result(result)
+                issue_type = result.get('metadata', {}).get('issue_type', '').lower()
+                project_key = 'UNKNOWN'
+                
+                # Check if issue is from expected project
+                if jira_key:
+                    project_key = jira_key.split('-')[0] if '-' in jira_key else ''
+                    if project_key not in expected_projects:
+                        continue  # Skip without logging to reduce noise
+                
+                # Exclude Epic type issues
+                if issue_type == 'epic':
+                    continue  # Skip without logging to reduce noise
+            
+            # Extract error patterns (for all results)
             if any(error_word in content for error_word in ['error', 'exception', 'failed', 'failure']):
                 error_patterns.append({
                     'platform': platform,
@@ -994,134 +1299,7 @@ Please provide a comprehensive analysis and summary of these search results.
                     'title': result.get('title', '')
                 })
             
-            # Enhanced Jira analysis: Extract comments for solutions with LLM analysis
-            if platform == 'jira':
-                jira_key = self._extract_jira_key_from_result(result)
-                if jira_key:
-                    logger.info(f"🎫 Deep-diving into Jira ticket {jira_key} for detailed analysis")
-                    jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query)
-                    if jira_details:
-                        detailed_solutions.append({
-                            'source': 'jira',
-                            'ticket': jira_key,
-                            'url': url,
-                            'solutions': jira_details.get('solutions', []),
-                            'comments': jira_details.get('comments', []),
-                            'llm_analysis': jira_details.get('llm_analysis', '')
-                        })
-                        
-                        # Add to all content for comprehensive LLM analysis
-                        all_extracted_content.append({
-                            'source': 'jira',
-                            'ticket': jira_key,
-                            'content': jira_details.get('full_content', ''),
-                            'analysis': jira_details.get('llm_analysis', '')
-                        })
-                
-                related_tickets.append({
-                    'title': result.get('title', ''),
-                    'url': url,
-                    'status': result.get('metadata', {}).get('status', 'Unknown'),
-                    'key': jira_key
-                })
-            
-            # Enhanced Slack analysis: Extract thread conversations for solutions with LLM analysis
-            elif platform == 'slack':
-                logger.info(f"💬 Deep-diving into Slack thread for comprehensive analysis")
-                slack_solutions = await self._extract_slack_thread_solutions_with_llm(result, query)
-                if slack_solutions:
-                    detailed_solutions.append({
-                        'source': 'slack',
-                        'channel': result.get('metadata', {}).get('channel', 'unknown'),
-                        'url': url,
-                        'solutions': slack_solutions.get('solutions', []),
-                        'thread_summary': slack_solutions.get('thread_summary', ''),
-                        'llm_analysis': slack_solutions.get('llm_analysis', '')
-                    })
-                    
-                    # Add to all content for comprehensive LLM analysis
-                    all_extracted_content.append({
-                        'source': 'slack',
-                        'channel': result.get('metadata', {}).get('channel', 'unknown'),
-                        'content': slack_solutions.get('full_thread_content', ''),
-                        'analysis': slack_solutions.get('llm_analysis', '')
-                    })
-                
-                # ENHANCED: Extract Jira tickets mentioned in Slack threads and fetch their details
-                thread_summary = result.get('metadata', {}).get('thread_summary', '')
-                if thread_summary and 'jira tickets mentioned:' in thread_summary.lower():
-                    logger.info(f"🎫 Found Jira ticket references in Slack thread: {thread_summary}")
-                    jira_tickets = self._extract_jira_tickets_from_slack_thread(thread_summary)
-                    
-                    for jira_key in jira_tickets:
-                        logger.info(f"🔍 Fetching Jira ticket {jira_key} mentioned in Slack thread")
-                        jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query)
-                        if jira_details:
-                            detailed_solutions.append({
-                                'source': 'jira',
-                                'ticket': jira_key,
-                                'url': f"https://acquia.atlassian.net/browse/{jira_key}",
-                                'solutions': jira_details.get('solutions', []),
-                                'comments': jira_details.get('comments', []),
-                                'llm_analysis': jira_details.get('llm_analysis', ''),
-                                'found_via': f'slack_thread_#{result.get("metadata", {}).get("channel", "unknown")}'
-                            })
-                            
-                            # Add to all content for comprehensive LLM analysis
-                            all_extracted_content.append({
-                                'source': 'jira_from_slack',
-                                'ticket': jira_key,
-                                'content': jira_details.get('full_content', ''),
-                                'analysis': jira_details.get('llm_analysis', ''),
-                                'found_via': f'slack_thread_#{result.get("metadata", {}).get("channel", "unknown")}'
-                            })
-                            
-                            # Also add to related_tickets for UI display
-                            related_tickets.append({
-                                'title': f"{jira_key}: {jira_details.get('comments', [{}])[0].get('body', 'Jira ticket from Slack thread')[:100]}...",
-                                'url': f"https://acquia.atlassian.net/browse/{jira_key}",
-                                'status': 'Referenced in Slack',
-                                'key': jira_key,
-                                'found_via': f'slack_thread_#{result.get("metadata", {}).get("channel", "unknown")}'
-                            })
-                
-                slack_discussions.append({
-                    'channel': result.get('metadata', {}).get('channel', 'unknown'),
-                    'content': result.get('content', '')[:200],
-                    'url': url,
-                    'thread_info': slack_solutions.get('thread_summary', '') if slack_solutions else ''
-                })
-            
-            # Enhanced Confluence analysis: Extract full page content for solutions with LLM analysis
-            elif platform == 'confluence':
-                logger.info(f"📄 Deep-diving into Confluence page for comprehensive analysis")
-                confluence_solutions = await self._extract_confluence_page_solutions_with_llm(result, query)
-                if confluence_solutions:
-                    detailed_solutions.append({
-                        'source': 'confluence',
-                        'page_title': result.get('title', ''),
-                        'url': url,
-                        'solutions': confluence_solutions.get('solutions', []),
-                        'full_content': confluence_solutions.get('content', ''),
-                        'llm_analysis': confluence_solutions.get('llm_analysis', '')
-                    })
-                    
-                    # Add to all content for comprehensive LLM analysis
-                    all_extracted_content.append({
-                        'source': 'confluence',
-                        'page_title': result.get('title', ''),
-                        'content': confluence_solutions.get('content', ''),
-                        'analysis': confluence_solutions.get('llm_analysis', '')
-                    })
-                
-                confluence_docs.append({
-                    'title': result.get('title', ''),
-                    'space': result.get('metadata', {}).get('space', ''),
-                    'url': url,
-                    'excerpt': result.get('content', '')[:200]
-                })
-            
-            # Look for technical keywords
+            # Add to technical context (for all results)  
             if any(tech_word in content for tech_word in ['sql', 'database', 'snowflake', 'javascript', 'oozie']):
                 technical_context.append({
                     'platform': platform,
@@ -1129,8 +1307,140 @@ Please provide a comprehensive analysis and summary of these search results.
                     'source': result.get('title', ''),
                     'url': url
                 })
+            
+            # Add to platform-specific collections (for all results)
+            if platform == 'jira':
+                jira_key = self._extract_jira_key_from_result(result)
+                related_tickets.append({
+                    'title': result.get('title', ''),
+                    'url': url,
+                    'status': result.get('metadata', {}).get('status', 'Unknown'),
+                    'key': jira_key
+                })
+            elif platform == 'slack':
+                slack_discussions.append({
+                    'channel': result.get('metadata', {}).get('channel', 'unknown'),
+                    'content': result.get('content', '')[:200],
+                    'url': url,
+                    'thread_info': ''  # No thread info without LLM analysis
+                })
+            elif platform == 'confluence':
+                confluence_docs.append({
+                    'title': result.get('title', ''),
+                    'space': result.get('metadata', {}).get('space', ''),
+                    'url': url,
+                    'excerpt': result.get('content', '')[:200]
+                })
+        
+        # 🚀 NOW PROCESS ONLY PRIORITY RESULTS WITH EXPENSIVE LLM ANALYSIS
+        print(f"\n🤖 LLM ANALYSIS PHASE (TOP {len(priority_results)} PRIORITY RESULTS):")
+        
+        for result in priority_results:
+            platform = result.get('platform', '')
+            url = result.get('url', '')
+            
+            print(f"\n💰 Processing {platform.upper()} result with LLM analysis...")
+            
+            # Enhanced Jira analysis: Extract comments for solutions with LLM analysis
+            if platform == 'jira':
+                jira_key = self._extract_jira_key_from_result(result)
+                ticket_status = result.get('metadata', {}).get('status', '').lower()
+                issue_type = result.get('metadata', {}).get('issue_type', '')
+                
+                print(f"  🎫 JIRA TICKET: {jira_key} - Status: {ticket_status}")
+                
+                if jira_key and ticket_status == 'closed':
+                    print(f"    🔥 PRIORITY: CLOSED ticket - analyzing for actual resolution!")
+                    jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query, all_search_results)
+                elif jira_key:
+                    print(f"    ⚠️ Secondary: Open ticket - may not have final resolution")
+                    jira_details = await self._extract_jira_comments_and_solutions_with_llm(jira_key, query, all_search_results)
+                else:
+                    jira_details = None
+                
+                if jira_details:
+                    detailed_solutions.append({
+                        'source': 'jira',
+                        'ticket': jira_key,
+                        'url': url,
+                        'solutions': jira_details.get('solutions', []),
+                        'comments': jira_details.get('comments', []),
+                        'llm_analysis': jira_details.get('llm_analysis', '')
+                    })
+                    
+                    all_extracted_content.append({
+                        'source': 'jira',
+                        'ticket': jira_key,
+                        'content': jira_details.get('full_content', ''),
+                        'analysis': jira_details.get('llm_analysis', '')
+                    })
+            
+            # Enhanced Slack analysis: Extract thread conversations for solutions with LLM analysis
+            elif platform == 'slack':
+                channel = result.get('metadata', {}).get('channel', 'unknown')
+                print(f"  💬 SLACK THREAD: #{channel} - analyzing full thread conversation")
+                
+                slack_solutions = await self._extract_slack_thread_solutions_with_llm(result, query)
+                if slack_solutions:
+                    detailed_solutions.append({
+                        'source': 'slack',
+                        'channel': channel,
+                        'url': url,
+                        'solutions': slack_solutions.get('solutions', []),
+                        'thread_summary': slack_solutions.get('thread_summary', ''),
+                        'llm_analysis': slack_solutions.get('llm_analysis', '')
+                    })
+                    
+                    all_extracted_content.append({
+                        'source': 'slack',
+                        'channel': channel,
+                        'content': slack_solutions.get('full_thread_content', ''),
+                        'analysis': slack_solutions.get('llm_analysis', '')
+                    })
+            
+            # Enhanced Confluence analysis: Extract full page content for solutions with LLM analysis
+            elif platform == 'confluence':
+                page_title = result.get('title', 'Untitled')
+                print(f"  📄 CONFLUENCE PAGE: {page_title[:50]}... - analyzing full content")
+                
+                confluence_solutions = await self._extract_confluence_page_solutions_with_llm(result, query)
+                if confluence_solutions:
+                    detailed_solutions.append({
+                        'source': 'confluence',
+                        'page_title': page_title,
+                        'url': url,
+                        'solutions': confluence_solutions.get('solutions', []),
+                        'full_content': confluence_solutions.get('content', ''),
+                        'llm_analysis': confluence_solutions.get('llm_analysis', '')
+                    })
+                    
+                    all_extracted_content.append({
+                        'source': 'confluence',
+                        'page_title': page_title,
+                        'content': confluence_solutions.get('content', ''),
+                        'analysis': confluence_solutions.get('llm_analysis', '')
+                    })
+        
+        # Final optimization summary
+        print(f"\n💰 LLM API OPTIMIZATION SUMMARY:")
+        print(f"  📊 Total results processed: {len(results)}")
+        print(f"  🎯 Results with LLM analysis: {len(priority_results)}")
+        print(f"  💸 LLM calls made: {len(priority_results)} + 1 comprehensive = {len(priority_results) + 1}")
+        print(f"  🚫 LLM calls avoided: {len(results) - len(priority_results)}")
+        print(f"  💾 Cost savings: ~{((len(results) - len(priority_results)) / len(results) * 100):.0f}% API cost reduction")
         
         # Generate comprehensive LLM-powered solution analysis
+        print(f"\n🚀 STARTING COMPREHENSIVE LLM ANALYSIS:")
+        print(f"  📊 Sources to analyze: {len(all_extracted_content)} deep-extracted sources")
+        print(f"  🎯 Detailed solutions: {len(detailed_solutions)} solution sets")
+        print(f"  📋 Error patterns: {len(error_patterns)} patterns")
+        print(f"  🔧 Technical context: {len(technical_context)} context items")
+        
+        for i, content in enumerate(all_extracted_content, 1):
+            source = content.get('source', 'unknown')
+            content_length = len(content.get('content', ''))
+            print(f"    Source {i}: {source.upper()} - {content_length} characters of content")
+        
         logger.info(f"🤖 Generating comprehensive LLM analysis from {len(all_extracted_content)} deep-extracted sources")
         solution_analysis = await self._generate_comprehensive_llm_solution_analysis(
             query, error_patterns, technical_context, detailed_solutions, all_extracted_content
@@ -1534,7 +1844,7 @@ Please provide a comprehensive analysis and summary of these search results.
             logger.error(f"Error extracting Jira key from result: {e}")
             return None
     
-    async def _extract_jira_comments_and_solutions_with_llm(self, jira_key: str, query: str) -> Optional[Dict[str, Any]]:
+    async def _extract_jira_comments_and_solutions_with_llm(self, jira_key: str, query: str, all_search_results: List[Dict] = None) -> Optional[Dict[str, Any]]:
         """Extract comments and solutions from a Jira ticket with LLM analysis"""
         try:
             # Import Jira tool
@@ -1574,51 +1884,79 @@ Comment {i} by {comment.get('author', 'Unknown')} on {comment.get('created', 'Un
             llm_analysis = ""
             solutions = []
             
-            if self.llm and len(comments) > 0:
+            # ENHANCED APPROACH: Integrated chronological analysis with linked tickets
+            if self.llm and len(comments) > 0 and issue_details.get('status', '').lower() == 'closed':
                 try:
-                    system_prompt = f"""You are a technical expert analyzing a Jira ticket and its comments to find solutions related to the query: "{query}".
-
-Your task is to:
-1. Identify any solutions, workarounds, or fixes mentioned in the comments
-2. Extract step-by-step instructions if available
-3. Identify root causes mentioned
-4. Note any prevention measures suggested
-5. Highlight the most relevant solutions for the query
-
-Focus on actionable technical solutions and provide confidence scores based on how complete and tested the solutions appear to be."""
-
-                    user_prompt = f"""
-Query Context: {query}
-
-Jira Ticket Analysis:
-{full_content[:4000]}  # Limit content for LLM
-
-Please analyze this Jira ticket and extract:
-1. All solutions or workarounds mentioned
-2. Step-by-step instructions
-3. Root causes identified
-4. Prevention measures
-5. Confidence level for each solution (0.0 to 1.0)
-
-Format your response as a structured analysis with clear sections.
-"""
+                    print(f"\n🔗 Building integrated timeline for {jira_key} with linked tickets...")
+                    
+                    # Step 1: Find linked tickets mentioned in comments
+                    linked_ticket_ids = self._extract_jira_ticket_references_from_comments(comments)
+                    
+                    # Step 2: Get linked ticket details from search results
+                    linked_tickets = {}
+                    if all_search_results and linked_ticket_ids:
+                        for ticket_id in linked_ticket_ids:
+                            linked_result = self._find_linked_ticket_in_search_results(ticket_id, all_search_results)
+                            if linked_result:
+                                # Extract full ticket details using JiraTool
+                                import sys
+                                import os
+                                sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'tools', 'cdp_chat_tool'))
+                                from jira_tool import JiraTool
+                                
+                                jira_tool = JiraTool()
+                                linked_details = jira_tool.get_issue_details(ticket_id)
+                                if linked_details:
+                                    linked_tickets[ticket_id] = linked_details
+                                    print(f"  ✅ Added linked ticket {ticket_id}: {linked_details.get('summary', 'No summary')}")
+                    
+                    # Step 3: Build integrated chronological timeline
+                    primary_ticket_data = {
+                        'key': jira_key,
+                        'summary': issue_details.get('summary', 'No summary'),
+                        'status': issue_details.get('status', 'Unknown'),
+                        'description': issue_details.get('description', 'No description')
+                    }
+                    
+                    chronology_prompt = self._build_integrated_chronological_timeline(
+                        primary_ticket_data, linked_tickets, comments, query
+                    )
 
                     messages = [
-                        SystemMessage(content=system_prompt),
-                        HumanMessage(content=user_prompt)
+                        HumanMessage(content=chronology_prompt)
                     ]
+                    
+                    # LOG THE FULL PROMPT BEING SENT TO LLM
+                    print("=" * 100)
+                    print("🔍 JIRA CHRONOLOGICAL ANALYSIS - LLM INPUT:")
+                    print("=" * 100)
+                    print(chronology_prompt)
+                    print("=" * 100)
                     
                     response = self.llm(messages)
                     llm_analysis = response.content
                     
-                    # Parse LLM response to extract structured solutions
-                    if "solution" in llm_analysis.lower() or "fix" in llm_analysis.lower():
+                    # LOG THE FULL LLM RESPONSE
+                    print("🤖 JIRA CHRONOLOGICAL ANALYSIS - LLM RESPONSE:")
+                    print("=" * 100)
+                    print(llm_analysis)
+                    print("=" * 100)
+                    
+                    # Parse chronological analysis for actual resolution
+                    if llm_analysis and len(llm_analysis.strip()) > 50:  # Valid response
+                        # Look for high-confidence actual solutions (operational fixes)
+                        confidence = 0.9 if any(indicator in llm_analysis.lower() for indicator in [
+                            'increased warehouse size', 'alter warehouse', 'completed successfully', 
+                            'workflow completed', 'restarted', 'updated configuration', 'changed setting'
+                        ]) else 0.8
+                        
                         solutions.append({
-                            'source': 'llm_analysis',
+                            'source': 'chronological_analysis',
                             'content': llm_analysis,
-                            'confidence': 0.8,
-                            'type': 'llm_extracted_solution',
-                            'author': 'AI Analysis'
+                            'confidence': confidence,
+                            'type': 'actual_resolution_from_closed_ticket',
+                            'author': 'Resolution Analysis',
+                            'ticket_status': 'closed'
                         })
                     
                 except Exception as e:
@@ -1724,6 +2062,10 @@ Format your response as a structured analysis with clear sections.
     async def _extract_slack_thread_solutions_with_llm(self, result: Dict[str, Any], query: str) -> Optional[Dict[str, Any]]:
         """Extract thread conversations and solutions from Slack message with LLM analysis"""
         try:
+            print(f"\n" + "="*80)
+            print(f"🔍 SLACK THREAD EXTRACTION DEBUG STARTED")
+            print(f"="*80)
+            
             # Import Slack tool
             import sys
             import os
@@ -1732,48 +2074,68 @@ Format your response as a structured analysis with clear sections.
             
             slack_tool = SlackTool()
             
-            # Get channel and timestamp from result - check both 'timestamp' and 'ts' fields
-            channel = result.get('metadata', {}).get('channel', '')
-            timestamp = result.get('metadata', {}).get('timestamp', '') or result.get('metadata', {}).get('ts', '')
+            # NEW APPROACH: Parse Slack URL to get channel_id and thread_ts directly
+            print(f"📋 INPUT RESULT ANALYSIS:")
+            print(f"  Full result keys: {list(result.keys())}")
+            print(f"  Metadata keys: {list(result.get('metadata', {}).keys())}")
+            print(f"  Full metadata: {result.get('metadata', {})}")
+            print(f"  Result URL: '{result.get('url', '')}'")
             
-            if not channel:
-                logger.warning(f"Missing channel for Slack thread extraction. Available metadata: {list(result.get('metadata', {}).keys())}")
+            # Parse URL to extract channel_id and thread_ts
+            url = result.get('url', '')
+            url_info = self._parse_slack_url_for_thread_info(url)
+            
+            if not url_info:
+                print(f"❌ FAILED: Could not parse Slack URL for thread info")
                 return None
+                
+            channel_id = url_info['channel_id']
+            thread_ts = url_info['thread_ts']  # This is the parent thread timestamp
             
-            if not timestamp:
-                logger.warning(f"Missing timestamp for Slack thread extraction. Available metadata: {list(result.get('metadata', {}).keys())}")
-                # Try to extract timestamp from URL or other sources
-                url = result.get('url', '')
-                if '/archives/' in url and '/p' in url:
-                    # Extract timestamp from Slack URL format: /archives/CHANNEL/pTIMESTAMP
-                    try:
-                        timestamp_part = url.split('/p')[-1].split('?')[0]
-                        if timestamp_part.isdigit() and len(timestamp_part) >= 10:
-                            # Convert Slack URL timestamp format to proper timestamp
-                            timestamp = timestamp_part[:10] + '.' + timestamp_part[10:]
-                            logger.info(f"Extracted timestamp from URL: {timestamp}")
-                        else:
-                            logger.warning(f"Could not extract valid timestamp from URL: {url}")
-                            return None
-                    except Exception as e:
-                        logger.warning(f"Failed to extract timestamp from URL {url}: {e}")
-                        return None
-                else:
-                    return None
+            print(f"\n🎯 EXTRACTED FROM URL:")
+            print(f"  Channel ID: '{channel_id}' (direct from URL)")
+            print(f"  Thread TS: '{thread_ts}' (parent thread timestamp)")
+            print(f"  Skipping channel name resolution - using direct channel ID")
             
-            # Get channel ID
-            channel_id = slack_tool._get_channel_id(channel)
-            if not channel_id:
-                logger.warning(f"Could not find channel ID for {channel}")
-                return None
+            print(f"\n🧵 SLACK API - Thread Message Retrieval:")
+            print(f"  Channel ID: '{channel_id}'")
+            print(f"  Parent Thread TS: '{thread_ts}'")
+            print(f"  Calling slack_tool._get_thread_messages_by_channel_id('{channel_id}', '{thread_ts}')")
             
-            # Get full thread conversation with enhanced Jira ticket detection
-            thread_messages = slack_tool._get_thread_messages(channel_id, timestamp)
+            # Get full thread conversation using direct API call with channel_id and parent thread_ts
+            thread_messages = await self._get_slack_thread_messages_direct(slack_tool, channel_id, thread_ts)
+            
+            print(f"  API Response Type: {type(thread_messages)}")
+            print(f"  API Response Length: {len(thread_messages) if thread_messages else 0}")
+            
+            if thread_messages:
+                print(f"  ✅ SUCCESS: Retrieved {len(thread_messages)} thread messages")
+                print(f"  Thread message details:")
+                for i, msg in enumerate(thread_messages[:5], 1):  # Show first 5 messages
+                    user = msg.get('user', 'Unknown')
+                    text = msg.get('text', msg.get('content', ''))
+                    ts = msg.get('ts', msg.get('timestamp', ''))
+                    print(f"    Message {i}: User='{user}', TS='{ts}'")
+                    print(f"      Text: {text[:150]}{'...' if len(text) > 150 else ''}")
+                if len(thread_messages) > 5:
+                    print(f"    ... and {len(thread_messages) - 5} more messages")
+            else:
+                print(f"  ❌ FAILED: No thread messages returned (None or empty list)")
             
             if not thread_messages:
-                logger.info(f"No thread messages found for {channel}:{timestamp}")
+                print(f"\n🔄 FALLBACK ACTIVATED:")
+                logger.info(f"No thread messages found for {channel_id}:{thread_ts}")
+                print(f"  Reason: Direct Slack API call returned empty/None")
+                print(f"  Action: Using single original message as fallback")
                 # Fallback to original message analysis
                 thread_messages = [result]
+                print(f"  Fallback thread_messages: {len(thread_messages)} message(s)")
+                print(f"  Fallback message content: {result.get('content', '')[:200]}...")
+            else:
+                print(f"  💪 USING FULL THREAD: {len(thread_messages)} messages for analysis")
+            
+            print(f"\n📝 THREAD CONTENT PROCESSING:")
+            print(f"  Processing {len(thread_messages)} messages for analysis")
             
             # Extract all Jira tickets found in thread messages
             all_jira_tickets = []
@@ -1784,12 +2146,17 @@ Format your response as a structured analysis with clear sections.
             # Remove duplicates and log findings
             unique_jira_tickets = list(set(all_jira_tickets))
             if unique_jira_tickets:
+                print(f"  🎫 Found {len(unique_jira_tickets)} Jira tickets: {unique_jira_tickets}")
                 logger.info(f"🎫 Found {len(unique_jira_tickets)} unique Jira tickets in Slack thread: {unique_jira_tickets}")
+            else:
+                print(f"  📋 No Jira tickets found in thread messages")
             
             # Combine all thread content for LLM analysis
+            print(f"  📄 Building thread content for LLM analysis...")
+            channel_name = result.get('metadata', {}).get('channel', 'unknown')  # Get original channel name for display
             full_thread_content = f"""
 SLACK THREAD ANALYSIS
-Channel: #{channel}
+Channel: #{channel_name} (ID: {channel_id})
 Original Query Context: {query}
 
 THREAD CONVERSATION:
@@ -1806,12 +2173,21 @@ Message {i} by {user} at {ts}:
 ---
 """
             
+            print(f"  📏 Full thread content length: {len(full_thread_content)} characters")
+            print(f"  📋 Content preview (first 300 chars): {full_thread_content[:300]}...")
+            
             # Use LLM to analyze the thread for solutions
+            print(f"\n🤖 LLM ANALYSIS:")
+            print(f"  LLM Available: {self.llm is not None}")
+            print(f"  Thread messages count: {len(thread_messages)}")
+            
             llm_analysis = ""
             solutions = []
             
             if self.llm and len(thread_messages) > 0:
                 try:
+                    print(f"  🚀 Starting LLM analysis...")
+                    
                     system_prompt = f"""You are a technical expert analyzing a Slack thread conversation to find solutions related to the query: "{query}".
 
 Your task is to:
@@ -1824,11 +2200,14 @@ Your task is to:
 
 Focus on actionable technical solutions and community-validated approaches."""
 
+                    content_to_analyze = full_thread_content[:4000]  # Limit content for LLM
+                    print(f"  📏 Content sent to LLM: {len(content_to_analyze)} characters (truncated from {len(full_thread_content)})")
+                    
                     user_prompt = f"""
 Query Context: {query}
 
 Slack Thread Analysis:
-{full_thread_content[:4000]}  # Limit content for LLM
+{content_to_analyze}
 
 Please analyze this Slack thread and extract:
 1. All solutions or workarounds mentioned by team members
@@ -1839,7 +2218,8 @@ Please analyze this Slack thread and extract:
 
 Format your response as a structured analysis with clear sections for solutions, contributors, and validation.
 """
-
+                    
+                    print(f"  🔄 Sending request to LLM...")
                     messages = [
                         SystemMessage(content=system_prompt),
                         HumanMessage(content=user_prompt)
@@ -1848,8 +2228,12 @@ Format your response as a structured analysis with clear sections for solutions,
                     response = self.llm(messages)
                     llm_analysis = response.content
                     
+                    print(f"  ✅ LLM Response received: {len(llm_analysis)} characters")
+                    print(f"  📋 LLM Response preview: {llm_analysis[:300]}...")
+                    
                     # Parse LLM response to extract structured solutions
                     if "solution" in llm_analysis.lower() or "fix" in llm_analysis.lower() or "workaround" in llm_analysis.lower():
+                        print(f"  🎯 Solution keywords found in LLM response - creating solution entry")
                         solutions.append({
                             'source': 'llm_thread_analysis',
                             'content': llm_analysis,
@@ -1857,20 +2241,32 @@ Format your response as a structured analysis with clear sections for solutions,
                             'type': 'llm_extracted_community_solution',
                             'author': 'AI Analysis of Team Discussion'
                         })
+                    else:
+                        print(f"  ⚠️ No solution keywords found in LLM response")
                     
                 except Exception as e:
-                    logger.warning(f"LLM analysis failed for Slack thread {channel}:{timestamp}: {e}")
+                    print(f"  🚨 LLM ANALYSIS EXCEPTION: {e}")
+                    logger.warning(f"LLM analysis failed for Slack thread {channel_id}:{thread_ts}: {e}")
                     llm_analysis = f"LLM analysis failed: {str(e)}"
+            else:
+                if not self.llm:
+                    print(f"  ❌ LLM not available - skipping AI analysis")
+                else:
+                    print(f"  ❌ No thread messages - skipping LLM analysis")
             
+            print(f"\n🔍 KEYWORD-BASED SOLUTION EXTRACTION:")
             # Fallback keyword-based extraction from thread messages
             solution_keywords = [
                 'solved', 'fixed', 'resolved', 'solution', 'answer', 'workaround',
-                'try this', 'here\'s how', 'fix', 'restart', 'rerun', 'check',
+                'try this', 'here\'s how', 'fix', 'restart', 'rerun', 'check now',
                 'update', 'change', 'working', 'works', 'success', 'done',
                 'complete', 'issue resolved', 'problem solved', 'that worked',
                 'run this', 'use this', 'do this', 'configure', 'set', 'enable',
                 'i fixed it', 'this works', 'found the issue', 'here\'s the fix'
             ]
+            
+            print(f"  📝 Scanning {len(thread_messages)} messages for {len(solution_keywords)} solution keywords...")
+            keyword_solutions_found = 0
             
             for msg in thread_messages:
                 msg_text = msg.get('text', msg.get('content', '')).lower()
@@ -1879,24 +2275,41 @@ Format your response as a structured analysis with clear sections for solutions,
                 # Check if message contains solution keywords
                 matching_keywords = [kw for kw in solution_keywords if kw in msg_text]
                 if matching_keywords:
+                    keyword_solutions_found += 1
+                    confidence = min(len(matching_keywords) / 3.0, 1.0)
+                    print(f"    ✅ Message from {user}: {len(matching_keywords)} keywords matched, confidence: {confidence:.2f}")
+                    print(f"      Keywords: {matching_keywords}")
+                    print(f"      Text preview: {msg_text[:150]}...")
+                    
                     solutions.append({
                         'author': user,
                         'content': msg.get('text', msg.get('content', ''))[:500],
                         'timestamp': msg.get('ts', msg.get('timestamp', '')),
                         'keywords_matched': matching_keywords,
-                        'confidence': min(len(matching_keywords) / 3.0, 1.0),  # Max confidence at 3+ keywords
+                        'confidence': confidence,
                         'type': 'keyword_extracted_community_solution'
                     })
             
+            print(f"  📊 Keyword extraction results: {keyword_solutions_found} solution-containing messages found")
+            
             # Generate thread summary
-            thread_summary = f"Thread with {len(thread_messages)} messages in #{channel}"
+            thread_summary = f"Thread with {len(thread_messages)} messages in #{channel_name} (ID: {channel_id})"
             if solutions:
                 thread_summary += f" - {len(solutions)} potential solutions identified"
             
-            logger.info(f"💬 Extracted {len(solutions)} solutions from Slack thread #{channel} using LLM + keyword analysis")
+            print(f"\n📋 FINAL RESULTS SUMMARY:")
+            print(f"  Total solutions found: {len(solutions)}")
+            print(f"  LLM analysis length: {len(llm_analysis)} characters")
+            print(f"  Thread summary: {thread_summary}")
+            print(f"  Full thread content length: {len(full_thread_content)} characters")
+            print(f"="*80)
+            
+            logger.info(f"💬 Extracted {len(solutions)} solutions from Slack thread #{channel_name} (ID: {channel_id}) using LLM + keyword analysis")
             
             return {
-                'channel': channel,
+                'channel': channel_name,
+                'channel_id': channel_id,
+                'thread_ts': thread_ts,
                 'thread_summary': thread_summary,
                 'solutions': solutions,
                 'thread_message_count': len(thread_messages),
@@ -1906,6 +2319,12 @@ Format your response as a structured analysis with clear sections for solutions,
             }
             
         except Exception as e:
+            print(f"\n🚨 EXCEPTION IN SLACK THREAD EXTRACTION:")
+            print(f"  Exception type: {type(e).__name__}")
+            print(f"  Exception message: {e}")
+            import traceback
+            print(f"  Traceback: {traceback.format_exc()}")
+            print(f"="*80)
             logger.error(f"Error extracting Slack thread solutions with LLM: {e}")
             return None
 
@@ -2523,12 +2942,37 @@ URL: {context.get('url', 'No URL')}
 ---
 """
             
+            # PRIORITIZE ACTUAL RESOLUTIONS FROM CLOSED TICKETS
+            closed_ticket_solutions = [s for s in detailed_solutions if s.get('source') == 'jira' and 
+                                     any(sol.get('type') == 'actual_resolution_from_closed_ticket' for sol in s.get('solutions', []))]
+            other_solutions = [s for s in detailed_solutions if s not in closed_ticket_solutions]
+            
+            # Put actual resolutions first
+            prioritized_solutions = closed_ticket_solutions + other_solutions
+
             context_content += f"""
 
-DETAILED SOLUTIONS FROM PLATFORMS ({len(detailed_solutions)}):
+ACTUAL RESOLUTIONS FROM CLOSED TICKETS ({len(closed_ticket_solutions)} PRIORITY):
 """
             
-            for i, solution_set in enumerate(detailed_solutions, 1):
+            for i, solution_set in enumerate(closed_ticket_solutions, 1):
+                context_content += f"""
+PRIORITY RESOLUTION {i} from CLOSED JIRA TICKET:
+Ticket: {solution_set.get('ticket', 'Unknown')} (STATUS: CLOSED - ACTUAL RESOLUTION)
+"""
+                solutions = solution_set.get('solutions', [])
+                for j, sol in enumerate(solutions, 1):
+                    if sol.get('type') == 'actual_resolution_from_closed_ticket':
+                        context_content += f"ACTUAL RESOLUTION IMPLEMENTED: {sol.get('content', 'No content')[:500]}...\n"
+                        context_content += f"Confidence: {sol.get('confidence', 0):.2f} (HIGH - from closed ticket)\n"
+                context_content += "---\n"
+
+            context_content += f"""
+
+OTHER SOLUTIONS FROM PLATFORMS ({len(other_solutions)}):
+"""
+
+            for i, solution_set in enumerate(other_solutions, 1):
                 source = solution_set.get('source', 'unknown')
                 context_content += f"""
 Solution Set {i} from {source.upper()}:
@@ -2559,48 +3003,83 @@ Solution Set {i} from {source.upper()}:
             
             context_content += f"""
 
-EXTRACTED CONTENT SUMMARY ({len(all_extracted_content)}):
+FULL THREAD CONVERSATIONS AND CONTENT ({len(all_extracted_content)}):
 """
             
             for i, content in enumerate(all_extracted_content[:3], 1):
+                source = content.get('source', 'unknown')
+                full_content = content.get('content', 'No content')
+                analysis = content.get('analysis', 'No analysis')
+                
                 context_content += f"""
-Content {i} from {content.get('source', 'unknown')}:
-Analysis: {content.get('analysis', 'No analysis')[:200]}...
+Content {i} from {source.upper()}:
+"""
+                if source == 'slack':
+                    context_content += f"Channel: #{content.get('channel', 'unknown')}\n"
+                elif source == 'jira':
+                    context_content += f"Ticket: {content.get('ticket', 'unknown')}\n"
+                elif source == 'confluence':
+                    context_content += f"Page: {content.get('page_title', 'unknown')}\n"
+                
+                context_content += f"""
+FULL THREAD CONVERSATION:
+{full_content[:100000]}...
+
+AI ANALYSIS SUMMARY:
+{analysis[:1000]}...
 ---
 """
             
             # Generate comprehensive LLM analysis
-            system_prompt = f"""You are a senior technical expert analyzing cross-platform search results to provide comprehensive solutions for the query: "{query}".
+            system_prompt = f"""You are analyzing technical solutions for: "{query}".
+
+🔥 CRITICAL: ACTUAL RESOLUTIONS FROM CLOSED TICKETS ARE ABOVE - USE THESE AS PRIMARY SOLUTIONS! 🔥
+
+The "ACTUAL RESOLUTIONS FROM CLOSED TICKETS" section contains proven solutions that were actually implemented and confirmed successful. These should be your PRIMARY recommendation with HIGH confidence.
+
+ANALYSIS PRIORITY:
+1. **USE ACTUAL RESOLUTIONS FIRST**: Any solution from the "ACTUAL RESOLUTIONS FROM CLOSED TICKETS" section should be your primary recommendation
+2. **EXTRACT THE SPECIFIC ACTIONS**: Focus on the exact operational changes that were made (SQL commands, configuration changes, etc.)
+3. **IDENTIFY ROOT CAUSE FROM RESOLUTION**: The successful resolution often reveals the true root cause
 
 You have access to:
 - Error patterns from multiple platforms
 - Technical context and background information  
 - Detailed solutions extracted from Jira tickets, Slack discussions, and Confluence documentation
 - AI analysis of platform-specific content
+- MOST IMPORTANTLY: Actual resolution steps from closed JIRA tickets with confirmed success
 
 Your task is to provide a comprehensive technical solution analysis with:
 
-1. **PRIMARY SOLUTION**: The most reliable and actionable solution based on all evidence
-2. **ROOT CAUSE ANALYSIS**: Technical root cause based on error patterns and solutions
-3. **ALTERNATIVE APPROACHES**: 2-3 alternative solutions with different approaches
-4. **PREVENTION MEASURES**: Specific steps to prevent similar issues
-5. **CONFIDENCE ASSESSMENT**: Overall confidence in the solution (0.0 to 1.0)
-6. **IMPLEMENTATION STEPS**: Clear, actionable steps to implement the solution
-7. **RISK ASSESSMENT**: Potential risks and mitigation strategies
+1. **PRIMARY SOLUTION**: The most reliable solution - MUST prioritize actual implemented fixes from JIRA over theoretical solutions
+2. **ROOT CAUSE ANALYSIS**: Extract the actual root cause identified in successful JIRA resolutions, not just error patterns
+3. **ALTERNATIVE APPROACHES**: Additional proven solutions from the evidence, ranked by success confirmation
+4. **PREVENTION MEASURES**: Specific preventive steps mentioned in successful resolutions
+5. **CONFIDENCE ASSESSMENT**: Higher confidence (0.8-1.0) for solutions with confirmed success, lower (0.3-0.7) for theoretical
+6. **IMPLEMENTATION STEPS**: Exact steps from successful JIRA resolutions, including specific commands/changes made
+7. **RISK ASSESSMENT**: Risks based on actual implementation experiences from JIRA comments
+
+ANALYSIS METHODOLOGY:
+- Step 1: Scan all JIRA tickets for status "Closed" with resolution confirmations
+- Step 2: Extract specific technical actions taken (commands, configuration changes, etc.)
+- Step 3: Look for success confirmations ("completed successfully", "working now", etc.)
+- Step 4: Use these proven solutions as PRIMARY recommendations
+- Step 5: Only supplement with theoretical approaches if no proven solutions exist
 
 Focus on:
-- Actionable technical solutions
-- Evidence-based recommendations
-- Cross-platform insights
-- Community-validated approaches
-- Official documentation alignment
+- PROVEN solutions over theoretical ones
+- Specific technical actions that worked
+- Evidence of successful implementation
+- Operational fixes and configuration changes
+- Community-validated approaches with success metrics
+- Step-by-step procedures that led to resolution
 
-Provide structured, professional analysis suitable for technical teams."""
+Provide structured, professional analysis that prioritizes what actually worked over what might work."""
 
             user_prompt = f"""
 Please analyze the following comprehensive technical information and provide a structured solution analysis:
 
-{context_content[:6000]}  # Limit content for LLM processing
+{context_content[:100000]}
 
 Generate a comprehensive solution analysis with clear sections for:
 1. Primary Solution (with implementation steps)
@@ -2611,8 +3090,31 @@ Generate a comprehensive solution analysis with clear sections for:
 6. Risk Assessment
 
 Base your analysis on the evidence provided from Jira tickets, Slack discussions, and Confluence documentation.
+Focus especially on the FULL THREAD CONVERSATIONS which contain the complete context and resolution details.
 """
 
+            # LOG THE COMPREHENSIVE ANALYSIS INPUTS
+            print("\n" + "="*120)
+            print("🔥 COMPREHENSIVE ANALYSIS - SYSTEM PROMPT:")
+            print("="*120)
+            print(system_prompt)
+            print("\n" + "="*120)
+            print("🔥 COMPREHENSIVE ANALYSIS - USER PROMPT & CONTEXT:")
+            print("="*120)
+            print(user_prompt)
+            print("="*120)
+            print("🔥 FULL CONTEXT CONTENT BEING SENT (INCLUDING COMPLETE SLACK THREADS):")
+            print("="*120)
+            print(f"📊 Content Statistics:")
+            print(f"  Total context length: {len(context_content)} characters")
+            print(f"  Content being sent to LLM: {min(len(context_content), 12000)} characters")
+            print(f"  Number of extracted sources: {len(all_extracted_content)}")
+            print(f"  Number of detailed solutions: {len(detailed_solutions)}")
+            print("="*120)
+            print("📋 CONTENT PREVIEW:")
+            print(context_content[:8000])
+            print("="*120)
+            
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
@@ -2620,6 +3122,13 @@ Base your analysis on the evidence provided from Jira tickets, Slack discussions
             
             response = self.llm(messages)
             llm_response = response.content
+            
+            # LOG THE COMPREHENSIVE ANALYSIS RESPONSE
+            print("\n" + "="*120)
+            print("🤖 COMPREHENSIVE ANALYSIS - LLM RESPONSE:")
+            print("="*120)
+            print(llm_response)
+            print("="*120)
             
             # Parse LLM response into structured format
             parsed_analysis = self._parse_llm_solution_response(llm_response)
@@ -3021,6 +3530,135 @@ Based on analysis of {len(detailed_solutions)} solution sources:
         }
         
         return analysis
+
+    def _extract_jira_ticket_references_from_comments(self, comments: List[Dict]) -> List[str]:
+        """Extract JIRA ticket IDs mentioned in comment text"""
+        try:
+            import re
+            
+            jira_tickets = []
+            
+            for comment in comments:
+                comment_text = comment.get('body', '')
+                
+                # Use the same regex patterns as the existing method
+                jira_patterns = [
+                    r'\b([A-Z]+\d*[A-Z]*-\d+)\b',  # Standard pattern like A1DEV-16589, AOPS-26534
+                    r'browse/([A-Z]+\d*[A-Z]*-\d+)',  # URL pattern
+                    r'ticket[:\s]+([A-Z]+\d*[A-Z]*-\d+)',  # "ticket: AOPS-26534"
+                ]
+                
+                for pattern in jira_patterns:
+                    matches = re.findall(pattern, comment_text, re.IGNORECASE)
+                    for ticket in matches:
+                        ticket_upper = ticket.upper()
+                        if ticket_upper not in jira_tickets and len(ticket_upper) >= 5:
+                            jira_tickets.append(ticket_upper)
+            
+            logger.info(f"🔗 Found {len(jira_tickets)} linked tickets in comments: {jira_tickets}")
+            return jira_tickets
+            
+        except Exception as e:
+            logger.error(f"Error extracting JIRA references from comments: {e}")
+            return []
+
+    def _find_linked_ticket_in_search_results(self, ticket_id: str, search_results: List[Dict]) -> Optional[Dict]:
+        """Find linked ticket data from search results"""
+        try:
+            if not search_results:
+                return None
+                
+            for result in search_results:
+                if result.get('platform') == 'jira':
+                    # Check if this result matches the ticket ID we're looking for
+                    result_ticket = self._extract_jira_key_from_result(result)
+                    if result_ticket and result_ticket.upper() == ticket_id.upper():
+                        logger.info(f"✅ Found linked ticket {ticket_id} in search results")
+                        return result
+            
+            logger.warning(f"❌ Linked ticket {ticket_id} not found in search results")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error finding linked ticket {ticket_id}: {e}")
+            return None
+
+    def _build_integrated_chronological_timeline(self, primary_ticket: Dict, linked_tickets: Dict[str, Dict], 
+                                               comments: List[Dict], query: str) -> str:
+        """Build chronological timeline integrating linked ticket details"""
+        try:
+            timeline = f"""You are analyzing a CLOSED Jira ticket to extract the ACTUAL RESOLUTION that was implemented.
+
+INTEGRATED TICKET CHRONOLOGY ANALYSIS:
+Primary Ticket: {primary_ticket.get('key', 'Unknown')} - {primary_ticket.get('summary', 'No summary')}
+Status: {primary_ticket.get('status', 'Unknown')} (CLOSED - meaning it was resolved)
+Query Context: "{query}"
+
+INITIAL PROBLEM:
+{primary_ticket.get('description', 'No description')[:500]}
+
+INTEGRATED RESOLUTION TIMELINE (chronological order with linked ticket details):
+"""
+
+            # Sort comments by creation date
+            sorted_comments = sorted(comments, key=lambda c: c.get('created', ''))
+            
+            for i, comment in enumerate(sorted_comments, 1):
+                comment_text = comment.get('body', 'No content')
+                author = comment.get('author', 'Unknown')
+                created = comment.get('created', 'Unknown date')
+                
+                timeline += f"""
+STEP {i} - {created} by {author}:
+{comment_text}
+"""
+                
+                # Check if this comment mentions any linked tickets
+                referenced_tickets = self._extract_jira_ticket_references_from_comments([comment])
+                
+                for ticket_ref in referenced_tickets:
+                    if ticket_ref in linked_tickets:
+                        linked_ticket = linked_tickets[ticket_ref]
+                        
+                        # Add linked ticket details right after the comment that references it
+                        timeline += f"""
+STEP {i}.1 - LINKED TICKET {ticket_ref} DETAILS:
+Summary: {linked_ticket.get('summary', 'No summary')}
+Status: {linked_ticket.get('status', 'Unknown')}
+Description: {linked_ticket.get('description', 'No description')[:500]}
+
+LINKED TICKET {ticket_ref} COMMENTS:"""
+                        
+                        # Add linked ticket comments if available
+                        linked_comments = linked_ticket.get('comments', [])
+                        if linked_comments:
+                            for j, linked_comment in enumerate(linked_comments[:5], 1):  # Limit to 5 comments
+                                timeline += f"""
+  Sub-step {i}.1.{j} - {linked_comment.get('created', 'Unknown')} by {linked_comment.get('author', 'Unknown')}:
+  {linked_comment.get('body', 'No content')[:300]}"""
+                        else:
+                            timeline += "\n  No comments available for linked ticket."
+                
+                timeline += "\n---"
+
+            timeline += f"""
+
+ANALYSIS TASK:
+Since this ticket is CLOSED and you have the complete integrated timeline including linked tickets, please:
+
+1. IDENTIFY THE ACTUAL SOLUTION: What specific action/change was made that resolved the issue? Look especially at the linked ticket details for operational changes.
+2. EXTRACT IMPLEMENTATION STEPS: What exact commands, configuration changes, or procedures were performed? Check linked tickets for technical details.
+3. FIND SUCCESS CONFIRMATION: Which comment confirms the solution worked?
+4. ROOT CAUSE: What was the actual underlying problem that was fixed?
+
+Focus ONLY on what was actually done to resolve this closed ticket. If you see operational actions in linked tickets like "increased warehouse size", "ALTER WAREHOUSE", "restarted service", "updated configuration" followed by "completed successfully" or similar confirmation, that's the actual solution.
+"""
+
+            return timeline
+            
+        except Exception as e:
+            logger.error(f"Error building integrated timeline: {e}")
+            return f"Error building timeline: {str(e)}"
 
     def get_server_status(self) -> Dict[str, Any]:
         """Get status of configured MCP servers"""

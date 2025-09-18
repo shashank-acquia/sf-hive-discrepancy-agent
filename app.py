@@ -709,7 +709,7 @@ def slack_search():
                     raw_solution_analysis = loop.run_until_complete(
                         asyncio.wait_for(
                             mcp_agent.analyze_technical_issue_and_generate_solution(result.get('results', []), query),
-                            timeout=5.0  # Reduced to 5s to prevent UI timeouts
+                            timeout=120.0  # Increased to 2 minutes for proper LLM analysis
                         )
                     )
                     

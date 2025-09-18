@@ -106,7 +106,7 @@ class JiraTool:
             jql_query += " ORDER BY updated DESC"  # Always sort by relevance/recency
 
             print(f"[DEBUG] Executing final JQL query: {jql_query}")
-            issues = self.jira.search_issues(jql_query, maxResults=max_results, expand='changelog')
+            issues = self.jira.enhanced_search_issues(jql_query, maxResults=max_results, expand='changelog')
 
             print(f"[INFO] JIRA API returned {len(issues)} issues.")
 
@@ -185,7 +185,7 @@ class JiraTool:
             # Now, fetch these issues in a single batch query
             # We don't need to re-apply the project filter here, as linked issues can be in any project
             jql_query = f'key in ({", ".join(linked_issue_keys)})'
-            linked_issues_result = self.jira.search_issues(jql_query, maxResults=len(linked_issue_keys))
+            linked_issues_result = self.jira.enhanced_search_issues(jql_query, maxResults=len(linked_issue_keys))
 
             # Format them using our standard helper
             formatted_linked_issues = [self._format_issue(issue) for issue in linked_issues_result]
@@ -252,7 +252,7 @@ class JiraTool:
                     jql_query = strategy
                 
                 logger.info(f"Executing similarity search JQL: {jql_query}")
-                issues = self.jira.search_issues(jql_query, maxResults=max_results//len(search_strategies) + 1)
+                issues = self.jira.enhanced_search_issues(jql_query, maxResults=max_results//len(search_strategies) + 1)
                 for issue in issues:
                     try:
                         # Safe access to all issue fields with proper error handling
@@ -441,7 +441,7 @@ class JiraTool:
         
         try:
             jql_query = f'project = "{project_key}" ORDER BY updated DESC'
-            issues = self.jira.search_issues(jql_query, maxResults=max_results)
+            issues = self.jira.enhanced_search_issues(jql_query, maxResults=max_results)
             
             results = []
             for issue in issues:
