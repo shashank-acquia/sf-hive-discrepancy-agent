@@ -20,7 +20,6 @@ class JiraTool:
                 self.jira = JIRA(
                     server=self.server,
                     basic_auth=(self.username, self.api_token),
-                    options={'verify': False}
                 )
             except Exception as e:
                 logger.error(f"Failed to initialize JIRA client: {e}")
