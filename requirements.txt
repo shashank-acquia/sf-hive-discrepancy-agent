@@ -13,7 +13,7 @@ faiss-cpu==1.11.0
 snowflake-connector-python[secure-local-storage]
 slack-sdk==3.27.1
 slack-bolt==1.18.1
-jira==3.5.2
+jira==3.10.5
 atlassian-python-api==3.41.10
 requests==2.31.0
 
