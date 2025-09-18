@@ -902,6 +902,115 @@ Please provide a comprehensive analysis and summary of these search results.
         else:
             return 'general'
     
+    async def _get_slack_thread_messages_direct(self, slack_tool, channel_id: str, thread_ts: str) -> List[Dict[str, Any]]:
+        """
+        Get thread messages directly using Slack SDK with channel_id and parent thread timestamp
+        """
+        try:
+            print(f"  🔧 Direct Slack API call:")
+            print(f"    Method: conversations_replies")
+            print(f"    Channel ID: '{channel_id}'")
+            print(f"    Thread TS: '{thread_ts}'")
+            
+            # Use the Slack client directly to get thread replies
+            if hasattr(slack_tool, 'client') and slack_tool.client:
+                response = slack_tool.client.conversations_replies(
+                    channel=channel_id,
+                    ts=thread_ts,
+                    inclusive=True  # Include the parent message
+                )
+                
+                print(f"    API Response OK: {response.get('ok', False)}")
+                
+                if response.get('ok'):
+                    messages = response.get('messages', [])
+                    print(f"    ✅ SUCCESS: Retrieved {len(messages)} messages in thread")
+                    
+                    # Log thread structure
+                    for i, msg in enumerate(messages, 1):
+                        user = msg.get('user', 'Unknown')
+                        ts = msg.get('ts', '')
+                        text = msg.get('text', '')[:100]
+                        thread_ts_field = msg.get('thread_ts', '')
+                        
+                        print(f"      Message {i}: {user} at {ts}")
+                        print(f"        Thread TS: {thread_ts_field}")
+                        print(f"        Text: {text}...")
+                    
+                    return messages
+                else:
+                    error = response.get('error', 'Unknown error')
+                    print(f"    ❌ API Error: {error}")
+                    return []
+            else:
+                print(f"    ❌ Slack client not available")
+                return []
+                
+        except Exception as e:
+            print(f"    🚨 EXCEPTION in direct API call: {e}")
+            return []
+
+    def _parse_slack_url_for_thread_info(self, url: str) -> Optional[Dict[str, str]]:
+        """
+        Parse Slack URL to extract channel_id and parent thread timestamp
+        
+        URL formats:
+        Parent: https://acquia.slack.com/archives/C012J3T0S9H/p1757099567133569
+        Reply:  https://acquia.slack.com/archives/C012J3T0S9H/p1757099567133569?thread_ts=1757099501.569169&cid=C012J3T0S9H
+        
+        Returns: {channel_id: str, thread_ts: str} or None if parsing fails
+        """
+        try:
+            print(f"\n🔗 PARSING SLACK URL FOR THREAD INFO:")
+            print(f"  Input URL: {url}")
+            
+            if not url or '/archives/' not in url:
+                print(f"  ❌ Invalid URL format - missing /archives/")
+                return None
+            
+            # Extract channel_id from /archives/{channel_id}/
+            url_parts = url.split('/archives/')
+            if len(url_parts) < 2:
+                print(f"  ❌ Could not split URL on /archives/")
+                return None
+                
+            after_archives = url_parts[1]  # e.g., "C012J3T0S9H/p1757099567133569?thread_ts=1757099501.569169"
+            channel_id = after_archives.split('/')[0]  # e.g., "C012J3T0S9H"
+            
+            print(f"  📍 Extracted channel_id: '{channel_id}'")
+            
+            # Extract thread_ts from URL parameters
+            if 'thread_ts=' in url:
+                # This is a reply URL, extract the parent thread timestamp
+                thread_ts = url.split('thread_ts=')[1].split('&')[0]
+                print(f"  🧵 Found thread_ts parameter: '{thread_ts}' (this is the parent)")
+            else:
+                # This is the parent message URL, extract timestamp from p{timestamp}
+                if '/p' not in url:
+                    print(f"  ❌ No /p timestamp found in URL")
+                    return None
+                    
+                timestamp_part = url.split('/p')[1].split('?')[0]  # e.g., "1757099567133569"
+                if not timestamp_part.isdigit() or len(timestamp_part) < 10:
+                    print(f"  ❌ Invalid timestamp format: '{timestamp_part}'")
+                    return None
+                    
+                # Convert p{timestamp} format to proper timestamp (add decimal point)
+                thread_ts = timestamp_part[:10] + '.' + timestamp_part[10:]
+                print(f"  🎯 This is parent URL, converted timestamp: '{thread_ts}'")
+            
+            result = {
+                'channel_id': channel_id,
+                'thread_ts': thread_ts
+            }
+            
+            print(f"  ✅ SUCCESS: Parsed URL info: {result}")
+            return result
+            
+        except Exception as e:
+            print(f"  🚨 EXCEPTION parsing Slack URL: {e}")
+            return None
+
     def _generate_llm_context_from_insights(self, platform_insights: Dict[str, Any], query: str, context: Optional[Dict]) -> str:
         """Generate structured context for LLM to improve suggestions"""
         llm_context_parts = [
@@ -1201,6 +1310,17 @@ Please provide a comprehensive analysis and summary of these search results.
                 })
         
         # Generate comprehensive LLM-powered solution analysis
+        print(f"\n🚀 STARTING COMPREHENSIVE LLM ANALYSIS:")
+        print(f"  📊 Sources to analyze: {len(all_extracted_content)} deep-extracted sources")
+        print(f"  🎯 Detailed solutions: {len(detailed_solutions)} solution sets")
+        print(f"  📋 Error patterns: {len(error_patterns)} patterns")
+        print(f"  🔧 Technical context: {len(technical_context)} context items")
+        
+        for i, content in enumerate(all_extracted_content, 1):
+            source = content.get('source', 'unknown')
+            content_length = len(content.get('content', ''))
+            print(f"    Source {i}: {source.upper()} - {content_length} characters of content")
+        
         logger.info(f"🤖 Generating comprehensive LLM analysis from {len(all_extracted_content)} deep-extracted sources")
         solution_analysis = await self._generate_comprehensive_llm_solution_analysis(
             query, error_patterns, technical_context, detailed_solutions, all_extracted_content
@@ -1822,6 +1942,10 @@ Comment {i} by {comment.get('author', 'Unknown')} on {comment.get('created', 'Un
     async def _extract_slack_thread_solutions_with_llm(self, result: Dict[str, Any], query: str) -> Optional[Dict[str, Any]]:
         """Extract thread conversations and solutions from Slack message with LLM analysis"""
         try:
+            print(f"\n" + "="*80)
+            print(f"🔍 SLACK THREAD EXTRACTION DEBUG STARTED")
+            print(f"="*80)
+            
             # Import Slack tool
             import sys
             import os
@@ -1830,48 +1954,68 @@ Comment {i} by {comment.get('author', 'Unknown')} on {comment.get('created', 'Un
             
             slack_tool = SlackTool()
             
-            # Get channel and timestamp from result - check both 'timestamp' and 'ts' fields
-            channel = result.get('metadata', {}).get('channel', '')
-            timestamp = result.get('metadata', {}).get('timestamp', '') or result.get('metadata', {}).get('ts', '')
+            # NEW APPROACH: Parse Slack URL to get channel_id and thread_ts directly
+            print(f"📋 INPUT RESULT ANALYSIS:")
+            print(f"  Full result keys: {list(result.keys())}")
+            print(f"  Metadata keys: {list(result.get('metadata', {}).keys())}")
+            print(f"  Full metadata: {result.get('metadata', {})}")
+            print(f"  Result URL: '{result.get('url', '')}'")
             
-            if not channel:
-                logger.warning(f"Missing channel for Slack thread extraction. Available metadata: {list(result.get('metadata', {}).keys())}")
+            # Parse URL to extract channel_id and thread_ts
+            url = result.get('url', '')
+            url_info = self._parse_slack_url_for_thread_info(url)
+            
+            if not url_info:
+                print(f"❌ FAILED: Could not parse Slack URL for thread info")
                 return None
+                
+            channel_id = url_info['channel_id']
+            thread_ts = url_info['thread_ts']  # This is the parent thread timestamp
             
-            if not timestamp:
-                logger.warning(f"Missing timestamp for Slack thread extraction. Available metadata: {list(result.get('metadata', {}).keys())}")
-                # Try to extract timestamp from URL or other sources
-                url = result.get('url', '')
-                if '/archives/' in url and '/p' in url:
-                    # Extract timestamp from Slack URL format: /archives/CHANNEL/pTIMESTAMP
-                    try:
-                        timestamp_part = url.split('/p')[-1].split('?')[0]
-                        if timestamp_part.isdigit() and len(timestamp_part) >= 10:
-                            # Convert Slack URL timestamp format to proper timestamp
-                            timestamp = timestamp_part[:10] + '.' + timestamp_part[10:]
-                            logger.info(f"Extracted timestamp from URL: {timestamp}")
-                        else:
-                            logger.warning(f"Could not extract valid timestamp from URL: {url}")
-                            return None
-                    except Exception as e:
-                        logger.warning(f"Failed to extract timestamp from URL {url}: {e}")
-                        return None
-                else:
-                    return None
+            print(f"\n🎯 EXTRACTED FROM URL:")
+            print(f"  Channel ID: '{channel_id}' (direct from URL)")
+            print(f"  Thread TS: '{thread_ts}' (parent thread timestamp)")
+            print(f"  Skipping channel name resolution - using direct channel ID")
             
-            # Get channel ID
-            channel_id = slack_tool._get_channel_id(channel)
-            if not channel_id:
-                logger.warning(f"Could not find channel ID for {channel}")
-                return None
+            print(f"\n🧵 SLACK API - Thread Message Retrieval:")
+            print(f"  Channel ID: '{channel_id}'")
+            print(f"  Parent Thread TS: '{thread_ts}'")
+            print(f"  Calling slack_tool._get_thread_messages_by_channel_id('{channel_id}', '{thread_ts}')")
             
-            # Get full thread conversation with enhanced Jira ticket detection
-            thread_messages = slack_tool._get_thread_messages(channel_id, timestamp)
+            # Get full thread conversation using direct API call with channel_id and parent thread_ts
+            thread_messages = await self._get_slack_thread_messages_direct(slack_tool, channel_id, thread_ts)
+            
+            print(f"  API Response Type: {type(thread_messages)}")
+            print(f"  API Response Length: {len(thread_messages) if thread_messages else 0}")
+            
+            if thread_messages:
+                print(f"  ✅ SUCCESS: Retrieved {len(thread_messages)} thread messages")
+                print(f"  Thread message details:")
+                for i, msg in enumerate(thread_messages[:5], 1):  # Show first 5 messages
+                    user = msg.get('user', 'Unknown')
+                    text = msg.get('text', msg.get('content', ''))
+                    ts = msg.get('ts', msg.get('timestamp', ''))
+                    print(f"    Message {i}: User='{user}', TS='{ts}'")
+                    print(f"      Text: {text[:150]}{'...' if len(text) > 150 else ''}")
+                if len(thread_messages) > 5:
+                    print(f"    ... and {len(thread_messages) - 5} more messages")
+            else:
+                print(f"  ❌ FAILED: No thread messages returned (None or empty list)")
             
             if not thread_messages:
-                logger.info(f"No thread messages found for {channel}:{timestamp}")
+                print(f"\n🔄 FALLBACK ACTIVATED:")
+                logger.info(f"No thread messages found for {channel_id}:{thread_ts}")
+                print(f"  Reason: Direct Slack API call returned empty/None")
+                print(f"  Action: Using single original message as fallback")
                 # Fallback to original message analysis
                 thread_messages = [result]
+                print(f"  Fallback thread_messages: {len(thread_messages)} message(s)")
+                print(f"  Fallback message content: {result.get('content', '')[:200]}...")
+            else:
+                print(f"  💪 USING FULL THREAD: {len(thread_messages)} messages for analysis")
+            
+            print(f"\n📝 THREAD CONTENT PROCESSING:")
+            print(f"  Processing {len(thread_messages)} messages for analysis")
             
             # Extract all Jira tickets found in thread messages
             all_jira_tickets = []
@@ -1882,12 +2026,17 @@ Comment {i} by {comment.get('author', 'Unknown')} on {comment.get('created', 'Un
             # Remove duplicates and log findings
             unique_jira_tickets = list(set(all_jira_tickets))
             if unique_jira_tickets:
+                print(f"  🎫 Found {len(unique_jira_tickets)} Jira tickets: {unique_jira_tickets}")
                 logger.info(f"🎫 Found {len(unique_jira_tickets)} unique Jira tickets in Slack thread: {unique_jira_tickets}")
+            else:
+                print(f"  📋 No Jira tickets found in thread messages")
             
             # Combine all thread content for LLM analysis
+            print(f"  📄 Building thread content for LLM analysis...")
+            channel_name = result.get('metadata', {}).get('channel', 'unknown')  # Get original channel name for display
             full_thread_content = f"""
 SLACK THREAD ANALYSIS
-Channel: #{channel}
+Channel: #{channel_name} (ID: {channel_id})
 Original Query Context: {query}
 
 THREAD CONVERSATION:
@@ -1904,12 +2053,21 @@ Message {i} by {user} at {ts}:
 ---
 """
             
+            print(f"  📏 Full thread content length: {len(full_thread_content)} characters")
+            print(f"  📋 Content preview (first 300 chars): {full_thread_content[:300]}...")
+            
             # Use LLM to analyze the thread for solutions
+            print(f"\n🤖 LLM ANALYSIS:")
+            print(f"  LLM Available: {self.llm is not None}")
+            print(f"  Thread messages count: {len(thread_messages)}")
+            
             llm_analysis = ""
             solutions = []
             
             if self.llm and len(thread_messages) > 0:
                 try:
+                    print(f"  🚀 Starting LLM analysis...")
+                    
                     system_prompt = f"""You are a technical expert analyzing a Slack thread conversation to find solutions related to the query: "{query}".
 
 Your task is to:
@@ -1922,11 +2080,14 @@ Your task is to:
 
 Focus on actionable technical solutions and community-validated approaches."""
 
+                    content_to_analyze = full_thread_content[:4000]  # Limit content for LLM
+                    print(f"  📏 Content sent to LLM: {len(content_to_analyze)} characters (truncated from {len(full_thread_content)})")
+                    
                     user_prompt = f"""
 Query Context: {query}
 
 Slack Thread Analysis:
-{full_thread_content[:4000]}  # Limit content for LLM
+{content_to_analyze}
 
 Please analyze this Slack thread and extract:
 1. All solutions or workarounds mentioned by team members
@@ -1937,7 +2098,8 @@ Please analyze this Slack thread and extract:
 
 Format your response as a structured analysis with clear sections for solutions, contributors, and validation.
 """
-
+                    
+                    print(f"  🔄 Sending request to LLM...")
                     messages = [
                         SystemMessage(content=system_prompt),
                         HumanMessage(content=user_prompt)
@@ -1946,8 +2108,12 @@ Format your response as a structured analysis with clear sections for solutions,
                     response = self.llm(messages)
                     llm_analysis = response.content
                     
+                    print(f"  ✅ LLM Response received: {len(llm_analysis)} characters")
+                    print(f"  📋 LLM Response preview: {llm_analysis[:300]}...")
+                    
                     # Parse LLM response to extract structured solutions
                     if "solution" in llm_analysis.lower() or "fix" in llm_analysis.lower() or "workaround" in llm_analysis.lower():
+                        print(f"  🎯 Solution keywords found in LLM response - creating solution entry")
                         solutions.append({
                             'source': 'llm_thread_analysis',
                             'content': llm_analysis,
@@ -1955,20 +2121,32 @@ Format your response as a structured analysis with clear sections for solutions,
                             'type': 'llm_extracted_community_solution',
                             'author': 'AI Analysis of Team Discussion'
                         })
+                    else:
+                        print(f"  ⚠️ No solution keywords found in LLM response")
                     
                 except Exception as e:
-                    logger.warning(f"LLM analysis failed for Slack thread {channel}:{timestamp}: {e}")
+                    print(f"  🚨 LLM ANALYSIS EXCEPTION: {e}")
+                    logger.warning(f"LLM analysis failed for Slack thread {channel_id}:{thread_ts}: {e}")
                     llm_analysis = f"LLM analysis failed: {str(e)}"
+            else:
+                if not self.llm:
+                    print(f"  ❌ LLM not available - skipping AI analysis")
+                else:
+                    print(f"  ❌ No thread messages - skipping LLM analysis")
             
+            print(f"\n🔍 KEYWORD-BASED SOLUTION EXTRACTION:")
             # Fallback keyword-based extraction from thread messages
             solution_keywords = [
                 'solved', 'fixed', 'resolved', 'solution', 'answer', 'workaround',
-                'try this', 'here\'s how', 'fix', 'restart', 'rerun', 'check',
+                'try this', 'here\'s how', 'fix', 'restart', 'rerun', 'check now',
                 'update', 'change', 'working', 'works', 'success', 'done',
                 'complete', 'issue resolved', 'problem solved', 'that worked',
                 'run this', 'use this', 'do this', 'configure', 'set', 'enable',
                 'i fixed it', 'this works', 'found the issue', 'here\'s the fix'
             ]
+            
+            print(f"  📝 Scanning {len(thread_messages)} messages for {len(solution_keywords)} solution keywords...")
+            keyword_solutions_found = 0
             
             for msg in thread_messages:
                 msg_text = msg.get('text', msg.get('content', '')).lower()
@@ -1977,24 +2155,41 @@ Format your response as a structured analysis with clear sections for solutions,
                 # Check if message contains solution keywords
                 matching_keywords = [kw for kw in solution_keywords if kw in msg_text]
                 if matching_keywords:
+                    keyword_solutions_found += 1
+                    confidence = min(len(matching_keywords) / 3.0, 1.0)
+                    print(f"    ✅ Message from {user}: {len(matching_keywords)} keywords matched, confidence: {confidence:.2f}")
+                    print(f"      Keywords: {matching_keywords}")
+                    print(f"      Text preview: {msg_text[:150]}...")
+                    
                     solutions.append({
                         'author': user,
                         'content': msg.get('text', msg.get('content', ''))[:500],
                         'timestamp': msg.get('ts', msg.get('timestamp', '')),
                         'keywords_matched': matching_keywords,
-                        'confidence': min(len(matching_keywords) / 3.0, 1.0),  # Max confidence at 3+ keywords
+                        'confidence': confidence,
                         'type': 'keyword_extracted_community_solution'
                     })
             
+            print(f"  📊 Keyword extraction results: {keyword_solutions_found} solution-containing messages found")
+            
             # Generate thread summary
-            thread_summary = f"Thread with {len(thread_messages)} messages in #{channel}"
+            thread_summary = f"Thread with {len(thread_messages)} messages in #{channel_name} (ID: {channel_id})"
             if solutions:
                 thread_summary += f" - {len(solutions)} potential solutions identified"
             
-            logger.info(f"💬 Extracted {len(solutions)} solutions from Slack thread #{channel} using LLM + keyword analysis")
+            print(f"\n📋 FINAL RESULTS SUMMARY:")
+            print(f"  Total solutions found: {len(solutions)}")
+            print(f"  LLM analysis length: {len(llm_analysis)} characters")
+            print(f"  Thread summary: {thread_summary}")
+            print(f"  Full thread content length: {len(full_thread_content)} characters")
+            print(f"="*80)
+            
+            logger.info(f"💬 Extracted {len(solutions)} solutions from Slack thread #{channel_name} (ID: {channel_id}) using LLM + keyword analysis")
             
             return {
-                'channel': channel,
+                'channel': channel_name,
+                'channel_id': channel_id,
+                'thread_ts': thread_ts,
                 'thread_summary': thread_summary,
                 'solutions': solutions,
                 'thread_message_count': len(thread_messages),
@@ -2004,6 +2199,12 @@ Format your response as a structured analysis with clear sections for solutions,
             }
             
         except Exception as e:
+            print(f"\n🚨 EXCEPTION IN SLACK THREAD EXTRACTION:")
+            print(f"  Exception type: {type(e).__name__}")
+            print(f"  Exception message: {e}")
+            import traceback
+            print(f"  Traceback: {traceback.format_exc()}")
+            print(f"="*80)
             logger.error(f"Error extracting Slack thread solutions with LLM: {e}")
             return None
 
@@ -2682,13 +2883,30 @@ Solution Set {i} from {source.upper()}:
             
             context_content += f"""
 
-EXTRACTED CONTENT SUMMARY ({len(all_extracted_content)}):
+FULL THREAD CONVERSATIONS AND CONTENT ({len(all_extracted_content)}):
 """
             
             for i, content in enumerate(all_extracted_content[:3], 1):
+                source = content.get('source', 'unknown')
+                full_content = content.get('content', 'No content')
+                analysis = content.get('analysis', 'No analysis')
+                
                 context_content += f"""
-Content {i} from {content.get('source', 'unknown')}:
-Analysis: {content.get('analysis', 'No analysis')[:200]}...
+Content {i} from {source.upper()}:
+"""
+                if source == 'slack':
+                    context_content += f"Channel: #{content.get('channel', 'unknown')}\n"
+                elif source == 'jira':
+                    context_content += f"Ticket: {content.get('ticket', 'unknown')}\n"
+                elif source == 'confluence':
+                    context_content += f"Page: {content.get('page_title', 'unknown')}\n"
+                
+                context_content += f"""
+FULL THREAD CONVERSATION:
+{full_content[:100000]}...
+
+AI ANALYSIS SUMMARY:
+{analysis[:1000]}...
 ---
 """
             
@@ -2741,7 +2959,7 @@ Provide structured, professional analysis that prioritizes what actually worked 
             user_prompt = f"""
 Please analyze the following comprehensive technical information and provide a structured solution analysis:
 
-{context_content[:6000]}  # Limit content for LLM processing
+{context_content[:100000]}
 
 Generate a comprehensive solution analysis with clear sections for:
 1. Primary Solution (with implementation steps)
@@ -2752,6 +2970,7 @@ Generate a comprehensive solution analysis with clear sections for:
 6. Risk Assessment
 
 Base your analysis on the evidence provided from Jira tickets, Slack discussions, and Confluence documentation.
+Focus especially on the FULL THREAD CONVERSATIONS which contain the complete context and resolution details.
 """
 
             # LOG THE COMPREHENSIVE ANALYSIS INPUTS
@@ -2764,9 +2983,16 @@ Base your analysis on the evidence provided from Jira tickets, Slack discussions
             print("="*120)
             print(user_prompt)
             print("="*120)
-            print("🔥 FULL CONTEXT CONTENT BEING SENT:")
+            print("🔥 FULL CONTEXT CONTENT BEING SENT (INCLUDING COMPLETE SLACK THREADS):")
             print("="*120)
-            print(context_content[:6000])
+            print(f"📊 Content Statistics:")
+            print(f"  Total context length: {len(context_content)} characters")
+            print(f"  Content being sent to LLM: {min(len(context_content), 12000)} characters")
+            print(f"  Number of extracted sources: {len(all_extracted_content)}")
+            print(f"  Number of detailed solutions: {len(detailed_solutions)}")
+            print("="*120)
+            print("📋 CONTENT PREVIEW:")
+            print(context_content[:8000])
             print("="*120)
             
             messages = [
