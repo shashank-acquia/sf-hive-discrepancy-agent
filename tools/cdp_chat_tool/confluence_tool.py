@@ -186,11 +186,68 @@ class ConfluenceTool:
         except Exception as e:
             logger.error(f"Error getting page content for {page_id}: {e}")
             return {}
+        
+    def search_by_url(self, url: str) -> List[Dict]:
+        """Search for a specific page by its URL"""
+        if not self.confluence:
+            return []
+        
+        try:
+            # Extract page ID from URL
+            # URL format: https://acquia.atlassian.net/wiki/spaces/DEV/pages/1080590357/Support+Runbook+-+Pinterest+Connector
+            import re
+            page_id_match = re.search(r'/pages/(\d+)', url)
+            
+            if page_id_match:
+                page_id = page_id_match.group(1)
+                print(f"[DEBUG] Extracted page ID {page_id} from URL: {url}")
+                
+                # Get the page by ID
+                page_content = self.get_page_content(page_id)
+                if page_content:
+                    return [page_content]
+            
+            # If we can't extract page ID, try searching by the page title from URL
+            title_match = re.search(r'/pages/\d+/([^/?]+)', url)
+            if title_match:
+                title = title_match.group(1).replace('+', ' ').replace('%20', ' ')
+                print(f"[DEBUG] Extracted title '{title}' from URL, searching...")
+                
+                # Search by title
+                cql_query = f'title ~ "{title}"'
+                results = self.confluence.cql(cql_query, limit=5)
+                
+                content_list = []
+                if 'results' in results:
+                    for result in results['results']:
+                        content = result.get('content', {})
+                        content_list.append({
+                            'id': content.get('id', ''),
+                            'title': content.get('title', ''),
+                            'type': content.get('type', ''),
+                            'space': content.get('space', {}).get('name', ''),
+                            'url': f"{self.server}/wiki{content.get('_links', {}).get('webui', '')}",
+                            'excerpt': result.get('excerpt', ''),
+                            'last_modified': content.get('version', {}).get('when', ''),
+                            'author': content.get('version', {}).get('by', {}).get('displayName', '')
+                        })
+            
+                return content_list
+        
+            return []
+        
+        except Exception as e:
+            logger.error(f"Error searching by URL {url}: {e}")
+            return []
     
     def search_similar_content(self, text: str, limit: int = 10) -> List[Dict]:
         """Find similar content based on text"""
         if not self.confluence:
             return []
+        
+        # Check if this is a URL - if so, redirect to search_by_url
+        if text.startswith('http') and 'atlassian.net/wiki' in text:
+            return self.search_by_url(text)
         
         # Extract keywords for better searching
         keywords = self._extract_keywords(text)
@@ -207,6 +264,7 @@ class ConfluenceTool:
         for query in search_queries:
             try:
                 results = self.confluence.cql(query, limit=limit//len(search_queries) + 1)
+
                 
                 if 'results' in results:
                     for result in results['results']:
