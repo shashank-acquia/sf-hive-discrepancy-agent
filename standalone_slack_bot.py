@@ -88,8 +88,9 @@ def handle_app_mention(event, say, logger):
             say("Hi! 👋 I can help you search for related issues in Jira, Slack, and Confluence. Just mention me with your question or issue description.", thread_ts=thread_ts)
             return
         
+        print("Message Text4:")
         # Show typing indicator
-        say("🔍 Searching for relevant information...", thread_ts=thread_ts)
+        say("🔍 Searching for relevant information 3...", thread_ts=thread_ts)
         
         # Perform the search
         result = perform_search(clean_text, channel)
@@ -128,9 +129,11 @@ def handle_message(message, say, logger):
             return
         
         logger.info(f"💬 Processing message from {user} in {channel}: {text[:100]}...")
+
+        print("Message Text1:", message['text'])
         
         # Show typing indicator
-        say("🔍 Searching for relevant information...", thread_ts=thread_ts)
+        say("🔍 Searching for relevant information 4...", thread_ts=thread_ts)
         
         # Perform the search
         result = perform_search(message['text'], channel)

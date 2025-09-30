@@ -104,6 +104,7 @@ class ConfluenceTool:
         def _search():
             # Use CQL (Confluence Query Language) for search
             cql_query = f'text ~ "{query}"'
+            print(f"[Confluence API] Searching with CQL: {cql_query} (limit={limit})")
             logger.info(f"Executing Confluence search with query: {cql_query}")
             
             results = self.confluence.cql(cql_query, limit=limit)
@@ -138,6 +139,7 @@ class ConfluenceTool:
         
         try:
             cql_query = f'space = "{space_key}" AND text ~ "{query}"'
+            print(f"[Confluence API] Space search: {cql_query} (limit={limit})")
             
             results = self.confluence.cql(cql_query, limit=limit)
             
@@ -167,6 +169,7 @@ class ConfluenceTool:
             return {}
         
         try:
+            print(f"[Confluence API] Getting page content: page_id={page_id}")
             page = self.confluence.get_page_by_id(
                 page_id, 
                 expand='body.storage,version,space'
@@ -206,6 +209,7 @@ class ConfluenceTool:
         
         for query in search_queries:
             try:
+                print(f"[Confluence API] Similar content search: {query}")
                 results = self.confluence.cql(query, limit=limit//len(search_queries) + 1)
                 
                 if 'results' in results:
@@ -241,6 +245,7 @@ class ConfluenceTool:
         
         try:
             cql_query = f'space = "{space_key}" ORDER BY lastModified DESC'
+            print(f"[Confluence API] Getting space content: {cql_query} (limit={limit})")
             
             results = self.confluence.cql(cql_query, limit=limit)
             
@@ -271,6 +276,7 @@ class ConfluenceTool:
             # Build CQL query for labels
             label_conditions = ' AND '.join([f'label = "{label}"' for label in labels])
             cql_query = f'{label_conditions} ORDER BY lastModified DESC'
+            print(f"[Confluence API] Searching by labels: {cql_query} (limit={limit})")
             
             results = self.confluence.cql(cql_query, limit=limit)
             
