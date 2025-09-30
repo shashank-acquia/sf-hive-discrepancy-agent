@@ -269,6 +269,7 @@ class SlackSearchAgent:
          
         try:
             if os.getenv('CONFLUENCE_SERVER'):
+                print("[DEBUG] Searching Confluence... for query: " + search_query_for_tools)
                 confluence_results = self.confluence_tool.search_similar_content(search_query_for_tools, limit=5)
                 results['confluence_pages'] = confluence_results
                 print(f"[INFO] Found {len(confluence_results)} relevant Confluence pages")

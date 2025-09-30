@@ -1427,7 +1427,6 @@ Please provide a comprehensive analysis and summary of these search results.
         print(f"  🎯 Results with LLM analysis: {len(priority_results)}")
         print(f"  💸 LLM calls made: {len(priority_results)} + 1 comprehensive = {len(priority_results) + 1}")
         print(f"  🚫 LLM calls avoided: {len(results) - len(priority_results)}")
-        print(f"  💾 Cost savings: ~{((len(results) - len(priority_results)) / len(results) * 100):.0f}% API cost reduction")
         
         # Generate comprehensive LLM-powered solution analysis
         print(f"\n🚀 STARTING COMPREHENSIVE LLM ANALYSIS:")
@@ -2914,41 +2913,11 @@ Format your response as a structured analysis with clear sections for solutions,
             context_content = f"""
 COMPREHENSIVE TECHNICAL ANALYSIS REQUEST
 Query: {query}
-Analysis Date: {self._get_timestamp()}
-
-ERROR PATTERNS DETECTED ({len(error_patterns)}):
-"""
-            
-            for i, error in enumerate(error_patterns[:3], 1):
-                context_content += f"""
-Error {i} from {error.get('platform', 'unknown')}:
-Title: {error.get('title', 'No title')}
-Content: {error.get('content', 'No content')[:300]}
-URL: {error.get('url', 'No URL')}
----
-"""
-            
-            context_content += f"""
-
-TECHNICAL CONTEXT ({len(technical_context)}):
-"""
-            
-            for i, context in enumerate(technical_context[:3], 1):
-                context_content += f"""
-Context {i} from {context.get('platform', 'unknown')}:
-Source: {context.get('source', 'Unknown')}
-Context: {context.get('context', 'No context')[:300]}
-URL: {context.get('url', 'No URL')}
----
-"""
-            
+"""         
             # PRIORITIZE ACTUAL RESOLUTIONS FROM CLOSED TICKETS
             closed_ticket_solutions = [s for s in detailed_solutions if s.get('source') == 'jira' and 
                                      any(sol.get('type') == 'actual_resolution_from_closed_ticket' for sol in s.get('solutions', []))]
             other_solutions = [s for s in detailed_solutions if s not in closed_ticket_solutions]
-            
-            # Put actual resolutions first
-            prioritized_solutions = closed_ticket_solutions + other_solutions
 
             context_content += f"""
 
@@ -2963,7 +2932,7 @@ Ticket: {solution_set.get('ticket', 'Unknown')} (STATUS: CLOSED - ACTUAL RESOLUT
                 solutions = solution_set.get('solutions', [])
                 for j, sol in enumerate(solutions, 1):
                     if sol.get('type') == 'actual_resolution_from_closed_ticket':
-                        context_content += f"ACTUAL RESOLUTION IMPLEMENTED: {sol.get('content', 'No content')[:500]}...\n"
+                        context_content += f"ACTUAL RESOLUTION IMPLEMENTED: {sol.get('content', 'No content')[:5000]}...\n"
                         context_content += f"Confidence: {sol.get('confidence', 0):.2f} (HIGH - from closed ticket)\n"
                 context_content += "---\n"
 
@@ -2987,7 +2956,6 @@ Solution Set {i} from {source.upper()}:
                 context_content += f"URL: {solution_set.get('url', 'No URL')}\n"
                 
                 solutions = solution_set.get('solutions', [])
-                context_content += f"Solutions found: {len(solutions)}\n"
                 
                 for j, sol in enumerate(solutions[:2], 1):  # Top 2 solutions per source
                     context_content += f"  Solution {j}: {sol.get('content', 'No content')[:200]}...\n"
@@ -2997,7 +2965,7 @@ Solution Set {i} from {source.upper()}:
                 # Add LLM analysis if available
                 llm_analysis = solution_set.get('llm_analysis', '')
                 if llm_analysis:
-                    context_content += f"AI Analysis: {llm_analysis[:300]}...\n"
+                    context_content += f"AI Analysis: {llm_analysis[:3000]}...\n"
                 
                 context_content += "---\n"
             
@@ -3008,22 +2976,9 @@ FULL THREAD CONVERSATIONS AND CONTENT ({len(all_extracted_content)}):
             
             for i, content in enumerate(all_extracted_content[:3], 1):
                 source = content.get('source', 'unknown')
-                full_content = content.get('content', 'No content')
                 analysis = content.get('analysis', 'No analysis')
-                
                 context_content += f"""
-Content {i} from {source.upper()}:
-"""
-                if source == 'slack':
-                    context_content += f"Channel: #{content.get('channel', 'unknown')}\n"
-                elif source == 'jira':
-                    context_content += f"Ticket: {content.get('ticket', 'unknown')}\n"
-                elif source == 'confluence':
-                    context_content += f"Page: {content.get('page_title', 'unknown')}\n"
-                
-                context_content += f"""
-FULL THREAD CONVERSATION:
-{full_content[:100000]}...
+
 
 AI ANALYSIS SUMMARY:
 {analysis[:1000]}...
@@ -3033,8 +2988,6 @@ AI ANALYSIS SUMMARY:
             # Generate comprehensive LLM analysis
             system_prompt = f"""You are analyzing technical solutions for: "{query}".
 
-🔥 CRITICAL: ACTUAL RESOLUTIONS FROM CLOSED TICKETS ARE ABOVE - USE THESE AS PRIMARY SOLUTIONS! 🔥
-
 The "ACTUAL RESOLUTIONS FROM CLOSED TICKETS" section contains proven solutions that were actually implemented and confirmed successful. These should be your PRIMARY recommendation with HIGH confidence.
 
 ANALYSIS PRIORITY:
@@ -3042,29 +2995,10 @@ ANALYSIS PRIORITY:
 2. **EXTRACT THE SPECIFIC ACTIONS**: Focus on the exact operational changes that were made (SQL commands, configuration changes, etc.)
 3. **IDENTIFY ROOT CAUSE FROM RESOLUTION**: The successful resolution often reveals the true root cause
 
-You have access to:
-- Error patterns from multiple platforms
-- Technical context and background information  
-- Detailed solutions extracted from Jira tickets, Slack discussions, and Confluence documentation
-- AI analysis of platform-specific content
-- MOST IMPORTANTLY: Actual resolution steps from closed JIRA tickets with confirmed success
-
-Your task is to provide a comprehensive technical solution analysis with:
+Your task is to provide a comprehensive technical solution analysis with List of these elements:
 
 1. **PRIMARY SOLUTION**: The most reliable solution - MUST prioritize actual implemented fixes from JIRA over theoretical solutions
 2. **ROOT CAUSE ANALYSIS**: Extract the actual root cause identified in successful JIRA resolutions, not just error patterns
-3. **ALTERNATIVE APPROACHES**: Additional proven solutions from the evidence, ranked by success confirmation
-4. **PREVENTION MEASURES**: Specific preventive steps mentioned in successful resolutions
-5. **CONFIDENCE ASSESSMENT**: Higher confidence (0.8-1.0) for solutions with confirmed success, lower (0.3-0.7) for theoretical
-6. **IMPLEMENTATION STEPS**: Exact steps from successful JIRA resolutions, including specific commands/changes made
-7. **RISK ASSESSMENT**: Risks based on actual implementation experiences from JIRA comments
-
-ANALYSIS METHODOLOGY:
-- Step 1: Scan all JIRA tickets for status "Closed" with resolution confirmations
-- Step 2: Extract specific technical actions taken (commands, configuration changes, etc.)
-- Step 3: Look for success confirmations ("completed successfully", "working now", etc.)
-- Step 4: Use these proven solutions as PRIMARY recommendations
-- Step 5: Only supplement with theoretical approaches if no proven solutions exist
 
 Focus on:
 - PROVEN solutions over theoretical ones
@@ -3082,15 +3016,10 @@ Please analyze the following comprehensive technical information and provide a s
 {context_content[:100000]}
 
 Generate a comprehensive solution analysis with clear sections for:
-1. Primary Solution (with implementation steps)
-2. Root Cause Analysis  
-3. Alternative Approaches
-4. Prevention Measures
-5. Confidence Assessment
-6. Risk Assessment
+1. Primary Solutions (with implementation steps)
+2. Root Cause Analysis
 
 Base your analysis on the evidence provided from Jira tickets, Slack discussions, and Confluence documentation.
-Focus especially on the FULL THREAD CONVERSATIONS which contain the complete context and resolution details.
 """
 
             # LOG THE COMPREHENSIVE ANALYSIS INPUTS

@@ -681,13 +681,55 @@
       </div>
     </div>
 
-    <div id="search-spinner" style="display: none;">
-      <div style="background: white; border-radius: 16px; padding: 3rem; box-shadow: 0 8px 32px rgba(0,0,0,0.15);">
-        <span class="three-quarters-loader" style="width: 80px; height: 80px; border-width: 6px; border-radius: 50%;"></span>
-        <p style="margin-top: 1.5rem; color: #667eea; font-weight: 700; font-size: 1.1rem;">🚀 MCP Intelligence Processing...</p>
-        <p style="margin: 1rem 0 0 0; color: #666; font-size: 1rem;">Analyzing Slack, Jira, and Confluence with AI enhancement</p>
-      </div>
-    </div>
+      <div id="cache-status-container" class="cache-status"></div>
+
+      <!-- Search Results -->
+      <div id="search-results" style="display: none;">
+        <!-- MCP Enhancement Header -->
+        <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; border-left: 4px solid #667eea;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+            <div style="display: flex; align-items: center;">
+              <span style="font-size: 1.5rem; margin-right: 0.5rem;">🚀</span>
+              <div>
+                <h3 style="margin: 0; color: #2c3e50; font-size: 1.2rem;">MCP-Enhanced Results</h3>
+                <p style="margin: 0; color: #666; font-size: 0.9rem;">Intelligent cross-platform search with AI insights</p>
+              </div>
+            </div>
+            <div id="mcp-stats" style="display: flex; gap: 1rem; flex-wrap: wrap;">
+              <!-- MCP stats will be populated here -->
+            </div>
+          </div>
+        </div>
+
+        <!-- LLM Response -->
+        <div id="llm-response" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2rem; border-radius: 12px; margin-bottom: 2rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+          <h3 style="margin: 0 0 1rem 0; display: flex; align-items: center;">
+            <span style="margin-right: 0.5rem;">🤖</span>
+            LLM Response
+            <span style="margin-left: auto; background: rgba(255,255,255,0.2); padding: 0.3rem 0.8rem; border-radius: 15px; font-size: 0.8rem;">Enhanced</span>
+          </h3>
+          <div id="llm-response-content" style="line-height: 1.6;"></div>
+        </div>
+
+        <!-- Platform Results -->
+        <div id="platform-results">
+          <!-- Slack Results -->
+          <div id="slack-results" class="platform-section">
+            <h3 style="color: #2c3e50; margin-bottom: 1rem; display: flex; align-items: center;">
+              <span style="margin-right: 0.5rem;">💬</span>
+              Slack Messages
+            </h3>
+            <div id="slack-content"></div>
+          </div>
+
+          <!-- Jira Results -->
+          <div id="jira-results" class="platform-section">
+            <h3 style="color: #2c3e50; margin-bottom: 1rem; display: flex; align-items: center;">
+              <span style="margin-right: 0.5rem;">🎫</span>
+              Jira Issues
+            </h3>
+            <div id="jira-content"></div>
+          </div>
 
     <div id="cache-status-container" class="cache-status" style="display: none;"></div>
 
@@ -695,7 +737,7 @@
       <!-- Results content will be populated here by JavaScript -->
     </div>
   </div>
-
+  <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
   <script>
     const form = document.getElementById("name-form");
     const spinner = document.getElementById("spinner");
@@ -969,34 +1011,11 @@
 
     function displaySearchResults(data) {
       const searchResults = document.getElementById('search-results');
-      
-      // Clear previous results
-      searchResults.innerHTML = '';
-
-      // MCP Enhancement Header
-      const mcpHeader = document.createElement('div');
-      mcpHeader.style.cssText = `
-        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-        border-radius: 16px;
-        padding: 2rem;
-        margin-bottom: 2rem;
-        border-left: 6px solid #667eea;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-      `;
-      
-      mcpHeader.innerHTML = `
-        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
-          <div style="display: flex; align-items: center;">
-            <span style="font-size: 2rem; margin-right: 1rem;">🚀</span>
-            <div>
-              <h3 style="margin: 0; color: #2c3e50; font-size: 1.4rem; font-weight: 700;">MCP-Enhanced Results</h3>
-              <p style="margin: 0.5rem 0 0 0; color: #666; font-size: 1rem;">Intelligent cross-platform search with AI insights</p>
-            </div>
-          </div>
-          <div id="mcp-stats" style="display: flex; gap: 1rem; flex-wrap: wrap;"></div>
-        </div>
-      `;
-      searchResults.appendChild(mcpHeader);
+      const llmResponseContent = document.getElementById('llm-response-content');
+      const slackContent = document.getElementById('slack-content');
+      const jiraContent = document.getElementById('jira-content');
+      const confluenceContent = document.getElementById('confluence-content');
+      const mcpStats = document.getElementById('mcp-stats');
 
       // Populate MCP stats
       const mcpStats = mcpHeader.querySelector('#mcp-stats');
@@ -1042,138 +1061,22 @@
       }
       
       mcpStats.innerHTML = statsHTML;
-
-      // AI Response Section
-      const aiResponse = document.createElement('div');
-      aiResponse.style.cssText = `
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 2.5rem;
-        border-radius: 16px;
-        margin-bottom: 2rem;
-        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
-      `;
       
-      let responseText = data.formatted_response || 'No AI response available';
+      // Convert markdown to HTML (basic conversion)
+      const markdownToHtml = (text) => {
+        return text
+          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+          .replace(/\*(.*?)\*/g, '<em>$1</em>')
+          .replace(/`(.*?)`/g, '<code>$1</code>')
+          .replace(/\n/g, '<br>')
+          .replace(/### (.*?)(<br>|$)/g, '<h3>$1</h3>')
+          .replace(/## (.*?)(<br>|$)/g, '<h2>$1</h2>')
+          .replace(/# (.*?)(<br>|$)/g, '<h1>$1</h1>');
+      };
       
-      if (data.mcp_enhanced) {
-        const mcpInfo = `\n\nMCP Intelligence Enhanced:\n• Semantic Score: ${data.semantic_score ? (data.semantic_score * 100).toFixed(1) + '%' : 'N/A'}\n• Platform Insights: ${data.platform_insights ? Object.keys(data.platform_insights).length : 0} platforms analyzed\n• Cross-platform Results: ${data.cross_platform_results ? data.cross_platform_results.length : 0} items\n• Processing Time: ${data.processing_time || 'N/A'}`;
-        responseText += mcpInfo;
-      }
-      
-      aiResponse.innerHTML = `
-        <h3 style="margin: 0 0 1.5rem 0; display: flex; align-items: center; font-size: 1.4rem; font-weight: 700;">
-          <span style="margin-right: 0.75rem;">🤖</span>
-          MCP AI Assistant Response
-          <span style="margin-left: auto; background: rgba(255,255,255,0.25); padding: 0.4rem 1rem; border-radius: 20px; font-size: 0.9rem;">Enhanced</span>
-        </h3>
-        <div style="line-height: 1.6; white-space: pre-wrap; font-size: 1.05rem;">${responseText}</div>
-      `;
-      searchResults.appendChild(aiResponse);
+      llmResponseContent.innerHTML = marked.parse(data.analysis);
 
-      // Solution Analysis Section
-      if (data.solution_analysis && data.solution_analysis.solutions && data.solution_analysis.solutions.length > 0) {
-        const solutionAnalysis = document.createElement('div');
-        solutionAnalysis.style.cssText = `
-          background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
-          color: white;
-          padding: 3rem;
-          border-radius: 20px;
-          margin-bottom: 2rem;
-          box-shadow: 0 12px 40px rgba(44, 62, 80, 0.3);
-          border: 1px solid rgba(255,255,255,0.1);
-        `;
-        
-        let solutionHTML = `
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.15);">
-            <h3 style="margin: 0; display: flex; align-items: center; font-size: 1.6rem; font-weight: 700;">
-              <span style="margin-right: 1rem; font-size: 1.8rem;">🔧</span>
-              Technical Solutions & Analysis
-            </h3>
-            <div style="display: flex; align-items: center; gap: 1rem;">
-              <span style="background: linear-gradient(135deg, #3498db, #2980b9); padding: 0.5rem 1.25rem; border-radius: 25px; font-size: 0.9rem; font-weight: 600; box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3);">
-                AI-Powered
-              </span>
-              <span style="background: rgba(255,255,255,0.15); padding: 0.5rem 1.25rem; border-radius: 25px; font-size: 0.9rem; font-weight: 600; backdrop-filter: blur(10px);">
-                Professional Analysis
-              </span>
-            </div>
-          </div>
-        `;
 
-        data.solution_analysis.solutions.forEach((solution, index) => {
-          solutionHTML += `
-            <div style="background: rgba(255,255,255,0.08); border-radius: 16px; padding: 2.5rem; margin-bottom: 2rem; border: 1px solid rgba(255,255,255,0.12); backdrop-filter: blur(10px);">
-              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(255,255,255,0.1);">
-                <h4 style="color: white; margin: 0; display: flex; align-items: center; font-size: 1.3rem; font-weight: 600;">
-                  <span style="margin-right: 1rem; font-size: 1.5rem;">⚡</span>
-                  Solution ${index + 1}: ${solution.error_pattern || 'Technical Issue'}
-                </h4>
-                <div style="background: linear-gradient(135deg, #e74c3c, #c0392b); padding: 0.4rem 1rem; border-radius: 20px; font-size: 0.85rem; font-weight: 600;">
-                  Critical Fix
-                </div>
-              </div>
-              
-              ${solution.technical_context ? `
-                <div style="margin-bottom: 1.5rem;">
-                  <strong style="color: rgba(255,255,255,0.9); font-size: 1.1rem;">Technical Context:</strong>
-                  <div style="background: rgba(0,0,0,0.2); padding: 1rem; border-radius: 8px; margin-top: 0.75rem; font-family: 'Monaco', 'Menlo', monospace; font-size: 0.95rem; line-height: 1.5; border-left: 4px solid #3498db;">
-                    ${solution.technical_context}
-                  </div>
-                </div>
-              ` : ''}
-              
-              ${solution.root_cause ? `
-                <div style="margin-bottom: 1.5rem;">
-                  <strong style="color: rgba(255,255,255,0.9); font-size: 1.1rem;">Root Cause:</strong>
-                  <div style="background: rgba(220,53,69,0.25); padding: 1rem; border-radius: 8px; margin-top: 0.75rem; border-left: 4px solid #dc3545; line-height: 1.5;">
-                    ${solution.root_cause}
-                  </div>
-                </div>
-              ` : ''}
-              
-              ${solution.solution ? `
-                <div style="margin-bottom: 1.5rem;">
-                  <strong style="color: rgba(255,255,255,0.9); font-size: 1.1rem;">Recommended Solution:</strong>
-                  <div style="background: rgba(40,167,69,0.25); padding: 1rem; border-radius: 8px; margin-top: 0.75rem; border-left: 4px solid #28a745; white-space: pre-wrap; line-height: 1.6;">
-                    ${solution.solution}
-                  </div>
-                  ${solution.source_url ? `
-                    <div style="margin-top: 1rem; padding: 0.75rem; background: rgba(255,255,255,0.1); border-radius: 8px; border-left: 4px solid #17a2b8;">
-                      <strong style="color: rgba(255,255,255,0.9); font-size: 1rem;">📎 Source:</strong>
-                      <div style="margin-top: 0.5rem;">
-                        <a href="${solution.source_url}" target="_blank" style="color: #87ceeb; text-decoration: none; font-size: 1rem; display: inline-flex; align-items: center; padding: 0.5rem 1rem; background: rgba(135, 206, 235, 0.1); border-radius: 8px; transition: all 0.3s ease;">
-                          <span style="margin-right: 0.5rem;">🔗</span>
-                          ${solution.source_platform ? `${solution.source_platform.toUpperCase()}: ` : ''}${solution.source_title || solution.ticket_key || solution.channel || solution.page_title || solution.error_pattern || 'View Source'}
-                        </a>
-                      </div>
-                    </div>
-                  ` : ''}
-                </div>
-              ` : ''}
-              
-              ${solution.confidence_score ? `
-                <div style="margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(255,255,255,0.2);">
-                  <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <span style="color: rgba(255,255,255,0.9); font-size: 1.1rem; font-weight: 600;">Confidence Score:</span>
-                    <div style="display: flex; align-items: center;">
-                      <div style="background: rgba(255,255,255,0.2); border-radius: 12px; padding: 0.4rem 1rem; margin-right: 1rem; font-weight: 600;">
-                        ${(solution.confidence_score * 100).toFixed(0)}%
-                      </div>
-                      <div style="width: 120px; height: 8px; background: rgba(255,255,255,0.2); border-radius: 4px; overflow: hidden;">
-                        <div style="width: ${solution.confidence_score * 100}%; height: 100%; background: ${solution.confidence_score > 0.8 ? '#28a745' : solution.confidence_score > 0.6 ? '#ffc107' : '#dc3545'}; border-radius: 4px; transition: width 0.5s ease;"></div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ` : ''}
-            </div>
-          `;
-        });
-        
-        solutionAnalysis.innerHTML = solutionHTML;
-        searchResults.appendChild(solutionAnalysis);
-      }
 
       // Platform Results Container
       const platformResults = document.createElement('div');

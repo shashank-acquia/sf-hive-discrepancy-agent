@@ -16,6 +16,7 @@ slack-bolt==1.18.1
 jira==3.10.5
 atlassian-python-api==3.41.10
 requests==2.31.0
+markdown_to_mrkdwn==0.2.0
 
 # MCP Enhanced Search Dependencies
 mcp>=1.0.0

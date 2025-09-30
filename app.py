@@ -16,6 +16,11 @@ import secrets
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from tools.utils import download_nltk_data
+from mcp_integration.mcp_enhanced_search_agent import MCPEnhancedSearchAgent
+from direct_api_fallback import direct_api_fallback
+import asyncio
+import traceback
+from markdown_to_mrkdwn import SlackMarkdownConverter
 
 # Import MCP integration
 try:
@@ -499,21 +504,26 @@ def handle_app_mention(event, say, client, logger):
             say("Hi! 👋 I can help you search for related issues in Jira, Slack, and Confluence. Just mention me with your question or issue description.", thread_ts=thread_ts)
             return
         
+        print("Message Text2:")
+        
         # Show typing indicator
-        say("🔍 Searching for relevant information...", thread_ts=thread_ts)
+        say("🔍 Searching for relevant information, please wait for a while.", thread_ts=thread_ts)
         
         # Perform the search
-        result = perform_search(clean_text, channel)
+        result = perform_search_mcp_fallback(clean_text, channel)
         
         if result.get('success'):
             # Send the formatted response
-            formatted_response = result.get('formatted_response', 'No response generated')
-            say(formatted_response, thread_ts=thread_ts)
+            response = generate_solution_analysis(clean_text, result)
+            converter = SlackMarkdownConverter()
+            slack_reply = converter.convert(response)
+            say(slack_reply, thread_ts=thread_ts)
         else:
             say(f"❌ Sorry, I encountered an error while processing your request: {result.get('error', 'Unknown error')}", thread_ts=thread_ts)
             
     except Exception as e:
         logger.error(f"Error handling app mention: {e}")
+        traceback.print_exc()
         say("❌ Sorry, I encountered an unexpected error. Please try again later.", thread_ts=event.get('ts'))
 
 @slack_app.message()
@@ -540,16 +550,25 @@ def handle_message(message, say, logger):
         
         logger.info(f"💬 Processing message from {user} in {channel}: {text[:100]}...")
         
+        print("Message Text3:", message['text'])
         # Show typing indicator
-        say("🔍 Searching for relevant information...", thread_ts=thread_ts)
+        say("🔍 Searching for relevant information 2...", thread_ts=thread_ts)
         
         # Perform the search
-        result = perform_search(message['text'], channel)
+        result = perform_search_mcp_fallback(message['text'], channel)
         
         if result.get('success'):
             # Send the formatted response
-            formatted_response = result.get('formatted_response', 'No response generated')
-            say(formatted_response, thread_ts=thread_ts)
+            print("Result:", result)
+            response = generate_solution_analysis(message['text'], result)
+            converter = SlackMarkdownConverter()
+            slack_reply = converter.convert(response)
+
+            slack_reply = re.sub(r'\*\*Actual Solution:\*\*', '', slack_reply).strip()
+            slack_reply = re.sub(r'\*\*Success Confirmation:\*\*.*', '', slack_reply).strip()
+            slack_reply = re.sub(r'\*\*Root Cause:\*\*', '', slack_reply).strip()
+
+            say(slack_reply, thread_ts=thread_ts)
         else:
             say(f"❌ Sorry, I encountered an error while processing your request: {result.get('error', 'Unknown error')}", thread_ts=thread_ts)
             
@@ -584,6 +603,47 @@ def handle_search_command(ack, respond, command, logger):
     except Exception as e:
         logger.error(f"Error handling search command: {e}")
         respond("❌ Sorry, I encountered an unexpected error. Please try again later.")
+
+# name something better
+def generate_solution_analysis(query, channel):
+    is_cached = False
+    current_key = f"search_cache::{query}"
+
+    if cache.has(current_key) and not session.get('disable_cache'):
+        is_cached = True
+        logger.info(f"✅ Cache HIT for query: '{query}'")
+    else:
+        logger.info(f"➡️ Cache MISS for query: '{query}'")
+    
+    # Check if MCP search is enabled via environment variable
+    is_mcp_enabled = os.getenv('IS_MCP_SEARCH_ENABLED', 'true').lower() == 'true'
+    
+    logger.info(f"API search request: {query} (MCP enabled: {is_mcp_enabled})")
+
+    # Conditionally use MCP or API search based on environment variable
+    if is_mcp_enabled and MCP_AVAILABLE and MCP_SERVERS_READY:
+        logger.info("🚀 Using MCP enhanced search")
+        result = perform_search_mcp_fallback(query, channel)
+    else:
+        logger.info("🔍 Using direct API search")
+        result = perform_search(query, channel)
+    
+    if result.get('success'):
+        # Generate solution recommendations using MCP enhanced search agent with direct API fallback
+        solution_analysis = None
+        mcp_agent = MCPEnhancedSearchAgent()
+            
+            # Run solution analysis with reduced timeout and fallback
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        logger.info(f"🧠 Analyzing technical issues and generating solutions for query: '{query}'")
+        raw_solution_analysis = loop.run_until_complete(
+                    asyncio.wait_for(
+                        mcp_agent.analyze_technical_issue_and_generate_solution(result.get('results', []), query),
+                        timeout=120.0  # Increased to 2 minutes for proper LLM analysis
+                    )
+                )
+        return raw_solution_analysis.get('solution_recommendations', {}).get('raw_llm_response', 'No solution generated')
 
 def start_bot():
     """Start the Slack bot in a separate thread"""
@@ -695,10 +755,6 @@ def slack_search():
             # Generate solution recommendations using MCP enhanced search agent with direct API fallback
             solution_analysis = None
             try:
-                from mcp_integration.mcp_enhanced_search_agent import MCPEnhancedSearchAgent
-                from direct_api_fallback import direct_api_fallback
-                import asyncio
-                
                 mcp_agent = MCPEnhancedSearchAgent()
                 
                 # Run solution analysis with reduced timeout and fallback
@@ -1116,7 +1172,8 @@ def slack_search():
                     'solutions': [],
                     'error': 'No solution analysis available'
                 },
-                'is_cached': is_cached
+                'is_cached': is_cached,
+                'analysis': solution_recommendations['raw_llm_response']
             })
         else:
             return jsonify({
