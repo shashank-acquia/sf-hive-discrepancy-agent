@@ -263,6 +263,7 @@ class SlackSearchAgent:
                 )
                 results['slack_messages'] = slack_results
                 print(f"[INFO] Found {len(slack_results)} relevant Slack messages")
+                
         except Exception as e:
             print(f"[ERROR] Error searching Slack: {e}")
          
@@ -346,7 +347,7 @@ class SlackSearchAgent:
             )[:7]
 
             all_linked_slack_urls = set()
-            all_linked_confluence_urls = set();
+            all_linked_confluence_urls = set()
             print(f"[INFO] Fetching full details for the top {len(final_ranked_tickets)} Jira tickets...")
             for ticket in final_ranked_tickets:
                 try:
@@ -403,9 +404,15 @@ class SlackSearchAgent:
         try:
             if os.getenv('CONFLUENCE_SERVER'):
                 for url in all_linked_confluence_urls:
-
-                    confluence_results = self.confluence_tool.search_similar_content(url, limit=1)
-                    detailed_confluence_pages.extend(confluence_results)
+                    # Clean the URL in case there are any formatting issues
+                    clean_url = url.strip().rstrip('|').rstrip(']')
+                    
+                    confluence_results = self.confluence_tool.search_similar_content(clean_url, limit=1)
+                    if confluence_results:
+                        detailed_confluence_pages.extend(confluence_results)
+                    else:
+                        print(f"[DEBUG] No results found for URL: {clean_url}")
+                        
                 # Add fetched detailed pages to the results, ensuring no duplicates with initial confluence_pages
                 existing_confluence_urls = {page['url'] for page in results['confluence_pages']}
                 for page in detailed_confluence_pages:
@@ -415,6 +422,8 @@ class SlackSearchAgent:
                         existing_confluence_urls.add(page['url'])
         except Exception as e:
             print(f"[WARNING] Confluence search failed: {e}")
+            import traceback
+            traceback.print_exc()
 
 
         results['jira_issues'] = final_jira_results_with_details
@@ -825,20 +834,25 @@ Please provide a comprehensive response that helps the user with their query. In
         """Extract Slack and Confluence links from text"""
         if not text:
             return {'slack_links': [], 'confluence_links': []}
-    
+
         # Patterns for Slack and Confluence links
         slack_pattern = r'https://acquia\.slack\.com/archives/[A-Z0-9]+/p[0-9]+'
-        confluence_pattern = r'https://acquia\.atlassian\.net/wiki/[^\s\"\'\)]+'
-    
+        # Updated Confluence pattern to be more precise and avoid duplicates
+        confluence_pattern = r'https://acquia\.atlassian\.net/wiki/[^\s\"\'\)\]\|]+'
+
         # Find all matches
         slack_links = re.findall(slack_pattern, text)
         confluence_links = re.findall(confluence_pattern, text)
-    
+        
+        # Remove duplicates and clean up links
+        slack_links = list(set(slack_links))
+        confluence_links = list(set(confluence_links))
+
         # Log what we found
         if slack_links:
-            logger.info(f"Found {len(slack_links)} Slack links in Jira content: {slack_links[:3]}")
+            logger.info(f"Found {len(slack_links)} Slack links in content: {slack_links[:3]}")
         if confluence_links:
-            logger.info(f"Found {len(confluence_links)} Confluence links in Jira content: {confluence_links[:3]}")
+            logger.info(f"Found {len(confluence_links)} Confluence links in content: {confluence_links[:3]}")
 
         return {
             'slack_links': slack_links,
