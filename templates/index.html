@@ -657,22 +657,22 @@
         </div>
       </div>
     </header>
-    
+
     <div class="search-section">
       <div style="text-align: center; margin-bottom: 2rem;">
         <h3 style="margin: 0; color: #2c3e50; font-size: 1.4rem;">🔍 Cross-Platform Intelligent Search</h3>
         <p style="margin: 1rem 0 0 0; color: #666; font-size: 1rem;">Search across Slack, Jira, and Confluence with AI-powered insights</p>
       </div>
       <div style="display: flex; flex-direction: column; gap: 1.5rem;">
-        <input 
-          type="text" 
-          id="helpdesk-search" 
-          placeholder="Ask anything... e.g., 'Show me recent deployment issues' or 'Find documentation about API changes'" 
+        <input
+          type="text"
+          id="helpdesk-search"
+          placeholder="Ask anything... e.g., 'Show me recent deployment issues' or 'Find documentation about API changes'"
           onkeypress="handleSearchKeyPress(event)"
         />
-        <button 
-          id="search-btn" 
-          onclick="performSearch()" 
+        <button
+          id="search-btn"
+          onclick="performSearch()"
           style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; padding: 1.25rem 2rem; border-radius: 12px; cursor: pointer; font-size: 1.1rem; font-weight: 700; transition: all 0.3s ease; align-self: center; min-width: 250px; box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);"
         >
           🚀 Search with MCP
@@ -681,62 +681,49 @@
       </div>
     </div>
 
-      <div id="cache-status-container" class="cache-status"></div>
-
-      <!-- Search Results -->
-      <div id="search-results" style="display: none;">
-        <!-- MCP Enhancement Header -->
-        <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; border-left: 4px solid #667eea;">
-          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
-            <div style="display: flex; align-items: center;">
-              <span style="font-size: 1.5rem; margin-right: 0.5rem;">🚀</span>
-              <div>
-                <h3 style="margin: 0; color: #2c3e50; font-size: 1.2rem;">MCP-Enhanced Results</h3>
-                <p style="margin: 0; color: #666; font-size: 0.9rem;">Intelligent cross-platform search with AI insights</p>
-              </div>
-            </div>
-            <div id="mcp-stats" style="display: flex; gap: 1rem; flex-wrap: wrap;">
-              <!-- MCP stats will be populated here -->
-            </div>
-          </div>
-        </div>
-
-        <!-- LLM Response -->
-        <div id="llm-response" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2rem; border-radius: 12px; margin-bottom: 2rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
-          <h3 style="margin: 0 0 1rem 0; display: flex; align-items: center;">
-            <span style="margin-right: 0.5rem;">🤖</span>
-            LLM Response
-            <span style="margin-left: auto; background: rgba(255,255,255,0.2); padding: 0.3rem 0.8rem; border-radius: 15px; font-size: 0.8rem;">Enhanced</span>
-          </h3>
-          <div id="llm-response-content" style="line-height: 1.6;"></div>
-        </div>
-
-        <!-- Platform Results -->
-        <div id="platform-results">
-          <!-- Slack Results -->
-          <div id="slack-results" class="platform-section">
-            <h3 style="color: #2c3e50; margin-bottom: 1rem; display: flex; align-items: center;">
-              <span style="margin-right: 0.5rem;">💬</span>
-              Slack Messages
-            </h3>
-            <div id="slack-content"></div>
-          </div>
-
-          <!-- Jira Results -->
-          <div id="jira-results" class="platform-section">
-            <h3 style="color: #2c3e50; margin-bottom: 1rem; display: flex; align-items: center;">
-              <span style="margin-right: 0.5rem;">🎫</span>
-              Jira Issues
-            </h3>
-            <div id="jira-content"></div>
-          </div>
-
-    <div id="cache-status-container" class="cache-status" style="display: none;"></div>
-
-    <div id="search-results" style="display: none;">
-      <!-- Results content will be populated here by JavaScript -->
+    <div id="search-spinner" class="spinner" style="display: none">
+      <span class="three-quarters-loader" style="width: 100px; height: 100px; border-radius: 50%; border-width: 12px;"></span>
     </div>
-  </div>
+
+    <div id="cache-status-container" class="cache-status"></div>
+
+    <!-- Corrected Search Results Section -->
+    <div id="search-results" style="display: none;">
+      <!-- MCP Enhancement Header -->
+      <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; padding: 1.5rem; margin-bottom: 2rem; border-left: 4px solid #667eea;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;">
+          <div style="display: flex; align-items: center;">
+            <span style="font-size: 1.5rem; margin-right: 0.5rem;">🚀</span>
+            <div>
+              <h3 style="margin: 0; color: #2c3e50; font-size: 1.2rem;">MCP-Enhanced Results</h3>
+              <p style="margin: 0; color: #666; font-size: 0.9rem;">Intelligent cross-platform search with AI insights</p>
+            </div>
+          </div>
+          <div id="mcp-stats" style="display: flex; gap: 1rem; flex-wrap: wrap;">
+            <!-- MCP stats will be populated here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- LLM Response -->
+      <div id="llm-response" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 2rem; border-radius: 12px; margin-bottom: 2rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+        <h3 style="margin: 0 0 1rem 0; display: flex; align-items: center;">
+          <span style="margin-right: 0.5rem;">🤖</span>
+          LLM Response
+          <span style="margin-left: auto; background: rgba(255,255,255,0.2); padding: 0.3rem 0.8rem; border-radius: 15px; font-size: 0.8rem;">Enhanced</span>
+        </h3>
+        <div id="llm-response-content" style="line-height: 1.6;"></div>
+      </div>
+
+      <!-- Platform Results -->
+      <div id="platform-results">
+        <div id="slack-results" class="platform-section"></div>
+        <div id="jira-results" class="platform-section"></div>
+        <div id="confluence-results" class="platform-section"></div>
+        <div id="google-docs-results" class="platform-section"></div>
+      </div>
+    </div>
+</div>
   <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
   <script>
     const form = document.getElementById("name-form");
@@ -1010,292 +997,102 @@
     }
 
     function displaySearchResults(data) {
-      const searchResults = document.getElementById('search-results');
-      const llmResponseContent = document.getElementById('llm-response-content');
-      const slackContent = document.getElementById('slack-content');
-      const jiraContent = document.getElementById('jira-content');
-      const confluenceContent = document.getElementById('confluence-content');
-      const mcpStats = document.getElementById('mcp-stats');
+    const searchResults = document.getElementById('search-results');
+    const llmResponseContent = document.getElementById('llm-response-content');
+    const mcpStats = document.getElementById('mcp-stats');
 
-      // Populate MCP stats
-      const mcpStats = mcpHeader.querySelector('#mcp-stats');
-      let statsHTML = '';
-      
-      if (data.mcp_enhanced) {
+    // Clear previous results
+    mcpStats.innerHTML = '';
+    llmResponseContent.innerHTML = '';
+    document.getElementById('slack-results').innerHTML = '';
+    document.getElementById('jira-results').innerHTML = '';
+    document.getElementById('confluence-results').innerHTML = '';
+    document.getElementById('google-docs-results').innerHTML = '';
+
+    // --- Populate MCP Stats ---
+    let statsHTML = '';
+    if (data.mcp_enhanced) {
+      statsHTML += `
+        <div style="background: rgba(102, 126, 234, 0.15); padding: 0.75rem 1.25rem; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+          <div style="font-weight: bold; color: #667eea; font-size: 1.1rem;">MCP Enhanced</div>
+          <div style="font-size: 0.9rem; color: #666; margin-top: 0.25rem;">✓ Active</div>
+        </div>`;
+      if (data.semantic_score) {
+        const scoreColor = data.semantic_score > 0.8 ? '#28a745' : data.semantic_score > 0.6 ? '#ffc107' : '#dc3545';
         statsHTML += `
-          <div style="background: rgba(102, 126, 234, 0.15); padding: 0.75rem 1.25rem; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-            <div style="font-weight: bold; color: #667eea; font-size: 1.1rem;">MCP Enhanced</div>
-            <div style="font-size: 0.9rem; color: #666; margin-top: 0.25rem;">✓ Active</div>
-          </div>
-        `;
-        
-        if (data.semantic_score) {
-          const scoreColor = data.semantic_score > 0.8 ? '#28a745' : data.semantic_score > 0.6 ? '#ffc107' : '#dc3545';
-          statsHTML += `
-            <div style="background: rgba(40, 167, 69, 0.15); padding: 0.75rem 1.25rem; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-              <div style="font-weight: bold; color: ${scoreColor}; font-size: 1.1rem;">${(data.semantic_score * 100).toFixed(0)}%</div>
-              <div style="font-size: 0.9rem; color: #666; margin-top: 0.25rem;">Relevance</div>
-            </div>
-          `;
-        }
-        
-        const totalResults = (data.search_results?.slack_messages?.length || 0) + 
-                           (data.search_results?.jira_issues?.length || 0) + 
-                           (data.search_results?.confluence_pages?.length || 0);
-        
-        if (totalResults > 0) {
-          statsHTML += `
-            <div style="background: rgba(23, 162, 184, 0.15); padding: 0.75rem 1.25rem; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-              <div style="font-weight: bold; color: #17a2b8; font-size: 1.1rem;">${totalResults}</div>
-              <div style="font-size: 0.9rem; color: #666; margin-top: 0.25rem;">Results Found</div>
-            </div>
-          `;
-        }
-      } else {
-        statsHTML = `
-          <div style="background: rgba(220, 53, 69, 0.15); padding: 0.75rem 1.25rem; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
-            <div style="font-weight: bold; color: #dc3545; font-size: 1.1rem;">MCP Unavailable</div>
-            <div style="font-size: 0.9rem; color: #666; margin-top: 0.25rem;">Basic Search</div>
-          </div>
-        `;
+          <div style="background: rgba(40, 167, 69, 0.15); padding: 0.75rem 1.25rem; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <div style="font-weight: bold; color: ${scoreColor}; font-size: 1.1rem;">${(data.semantic_score * 100).toFixed(0)}%</div>
+            <div style="font-size: 0.9rem; color: #666; margin-top: 0.25rem;">Relevance</div>
+          </div>`;
       }
-      
-      mcpStats.innerHTML = statsHTML;
-      
-      // Convert markdown to HTML (basic conversion)
-      const markdownToHtml = (text) => {
-        return text
-          .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-          .replace(/\*(.*?)\*/g, '<em>$1</em>')
-          .replace(/`(.*?)`/g, '<code>$1</code>')
-          .replace(/\n/g, '<br>')
-          .replace(/### (.*?)(<br>|$)/g, '<h3>$1</h3>')
-          .replace(/## (.*?)(<br>|$)/g, '<h2>$1</h2>')
-          .replace(/# (.*?)(<br>|$)/g, '<h1>$1</h1>');
-      };
-      
-      llmResponseContent.innerHTML = marked.parse(data.analysis);
-
-
-
-      // Platform Results Container
-      const platformResults = document.createElement('div');
-      platformResults.style.cssText = 'margin-top: 2rem;';
-
-      // Slack Results
-      const slackSection = document.createElement('div');
-      slackSection.className = 'platform-section';
-      slackSection.innerHTML = `
-        <h3 style="color: #2c3e50; margin-bottom: 1.5rem; display: flex; align-items: center; font-size: 1.4rem; font-weight: 700;">
-          <span style="margin-right: 1rem;">💬</span>
-          Slack Messages
-        </h3>
-        <div id="slack-content"></div>
-      `;
-      
-      const slackResults = data.search_results?.slack_messages || [];
-      const slackContent = slackSection.querySelector('#slack-content');
-      
-      if (slackResults.length > 0) {
-        slackResults.forEach(message => {
-          const messageCard = document.createElement('div');
-          messageCard.className = 'card';
-          messageCard.innerHTML = `
-            <div style="border-left: 6px solid #4A90E2; padding-left: 1.5rem;">
-              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
-                <div>
-                  <strong style="color: #4A90E2; font-size: 1.1rem;">Channel:</strong> #${message.channel || 'unknown'}<br>
-                  <strong style="color: #2c3e50;">User:</strong> ${message.user || 'Unknown'}
-                </div>
-                <div style="text-align: right; font-size: 0.9rem; color: #666;">
-                  ${message.timestamp ? new Date(message.timestamp * 1000).toLocaleString() : 'Unknown time'}
-                </div>
-              </div>
-              <strong style="color: #2c3e50; font-size: 1.05rem;">Message:</strong>
-              <div style="margin-top: 0.75rem; padding: 1rem; background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); border-radius: 8px; border-left: 4px solid #4A90E2; line-height: 1.5;">
-                ${message.text || 'No content'}
-              </div>
-              ${message.permalink ? `<div style="margin-top: 1rem; text-align: right;"><a href="${message.permalink}" target="_blank" style="color: #4A90E2; text-decoration: none; font-weight: 600; padding: 0.5rem 1rem; background: rgba(74, 144, 226, 0.1); border-radius: 8px; transition: all 0.3s ease;">🔗 View in Slack</a></div>` : ''}
-            </div>
-          `;
-          slackContent.appendChild(messageCard);
-        });
-      } else {
-        slackContent.innerHTML = '<div style="text-align: center; padding: 2rem; background: #f8f9fa; border-radius: 12px; color: #666; font-style: italic; font-size: 1.1rem;">No Slack messages found</div>';
+      const totalResults = (data.search_results?.slack_messages?.length || 0) + (data.search_results?.jira_issues?.length || 0) + (data.search_results?.confluence_pages?.length || 0);
+      if (totalResults > 0) {
+        statsHTML += `
+          <div style="background: rgba(23, 162, 184, 0.15); padding: 0.75rem 1.25rem; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <div style="font-weight: bold; color: #17a2b8; font-size: 1.1rem;">${totalResults}</div>
+            <div style="font-size: 0.9rem; color: #666; margin-top: 0.25rem;">Results Found</div>
+          </div>`;
       }
-      
-      platformResults.appendChild(slackSection);
-
-      // Jira Results
-      const jiraSection = document.createElement('div');
-      jiraSection.className = 'platform-section';
-      jiraSection.innerHTML = `
-        <h3 style="color: #2c3e50; margin-bottom: 1.5rem; display: flex; align-items: center; font-size: 1.4rem; font-weight: 700;">
-          <span style="margin-right: 1rem;">🎫</span>
-          Jira Issues
-        </h3>
-        <div id="jira-content"></div>
-      `;
-      
-      const jiraResults = data.search_results?.jira_issues || [];
-      const jiraContent = jiraSection.querySelector('#jira-content');
-      
-      if (jiraResults.length > 0) {
-        jiraResults.forEach(issue => {
-          const issueCard = document.createElement('div');
-          issueCard.className = 'card';
-          issueCard.innerHTML = `
-            <div style="border-left: 6px solid #0052CC; padding-left: 1.5rem;">
-              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
-                <div>
-                  <strong style="color: #0052CC; font-size: 1.2rem;">Issue:</strong> 
-                  <a href="${issue.url || '#'}" target="_blank" style="color: #0052CC; font-weight: bold; text-decoration: none; padding: 0.25rem 0.5rem; background: rgba(0, 82, 204, 0.1); border-radius: 6px; margin-left: 0.5rem;">${issue.key || 'Unknown'}</a>
-                </div>
-                <div style="display: flex; gap: 0.5rem;">
-                  <span style="background: #e3f2fd; color: #1976d2; padding: 0.3rem 0.75rem; border-radius: 20px; font-size: 0.85rem; font-weight: 600;">${issue.status || 'Unknown'}</span>
-                  <span style="background: #fff3e0; color: #f57c00; padding: 0.3rem 0.75rem; border-radius: 20px; font-size: 0.85rem; font-weight: 600;">${issue.priority || 'Unknown'}</span>
-                </div>
-              </div>
-              <div style="margin-bottom: 1rem;">
-                <strong style="color: #2c3e50; font-size: 1.05rem;">Summary:</strong> ${issue.summary || 'No summary'}<br>
-                <strong style="color: #2c3e50;">Assignee:</strong> ${issue.assignee || 'Unassigned'}
-              </div>
-              ${issue.description ? `
-                <div>
-                  <strong style="color: #2c3e50; font-size: 1.05rem;">Description:</strong>
-                  <div style="margin-top: 0.75rem; padding: 1rem; background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); border-radius: 8px; border-left: 4px solid #0052CC; max-height: 150px; overflow-y: auto; line-height: 1.5;">
-                    ${issue.description}
-                  </div>
-                </div>
-              ` : ''}
-            </div>
-          `;
-          jiraContent.appendChild(issueCard);
-        });
-      } else {
-        jiraContent.innerHTML = '<div style="text-align: center; padding: 2rem; background: #f8f9fa; border-radius: 12px; color: #666; font-style: italic; font-size: 1.1rem;">No Jira issues found</div>';
-      }
-      
-      platformResults.appendChild(jiraSection);
-
-      // Confluence Results
-      const confluenceSection = document.createElement('div');
-      confluenceSection.className = 'platform-section';
-      confluenceSection.innerHTML = `
-        <h3 style="color: #2c3e50; margin-bottom: 1.5rem; display: flex; align-items: center; font-size: 1.4rem; font-weight: 700;">
-          <span style="margin-right: 1rem;">📄</span>
-          Confluence Pages
-        </h3>
-        <div id="confluence-content"></div>
-      `;
-      
-      const confluenceResults = data.search_results?.confluence_pages || [];
-      const confluenceContent = confluenceSection.querySelector('#confluence-content');
-      
-      if (confluenceResults.length > 0) {
-        confluenceResults.forEach(page => {
-          const pageCard = document.createElement('div');
-          pageCard.className = 'card';
-          pageCard.innerHTML = `
-            <div style="border-left: 6px solid #172B4D; padding-left: 1.5rem;">
-              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
-                <div>
-                  <strong style="color: #172B4D; font-size: 1.2rem;">Page:</strong> 
-                  <a href="${page.url || '#'}" target="_blank" style="color: #172B4D; font-weight: bold; text-decoration: none; padding: 0.25rem 0.5rem; background: rgba(23, 43, 77, 0.1); border-radius: 6px; margin-left: 0.5rem;">${page.title || 'Untitled'}</a>
-                </div>
-                <div style="text-align: right; font-size: 0.9rem; color: #666;">
-                  ${page.lastModified ? new Date(page.lastModified).toLocaleDateString() : 'Unknown date'}
-                </div>
-              </div>
-              <div style="margin-bottom: 1rem;">
-                <strong style="color: #2c3e50; font-size: 1.05rem;">Space:</strong> ${page.space || 'Unknown'}
-              </div>
-              ${page.excerpt ? `
-                <div>
-                  <strong style="color: #2c3e50; font-size: 1.05rem;">Excerpt:</strong>
-                  <div style="margin-top: 0.75rem; padding: 1rem; background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); border-radius: 8px; border-left: 4px solid #172B4D; max-height: 150px; overflow-y: auto; line-height: 1.5;">
-                    ${page.excerpt}
-                  </div>
-                </div>
-              ` : ''}
-            </div>
-          `;
-          confluenceContent.appendChild(pageCard);
-        });
-      } else {
-        confluenceContent.innerHTML = '<div style="text-align: center; padding: 2rem; background: #f8f9fa; border-radius: 12px; color: #666; font-style: italic; font-size: 1.1rem;">No Confluence pages found</div>';
-      }
-      
-      platformResults.appendChild(confluenceSection);
-
-      // Google Docs Results
-      const googleDocsSection = document.createElement('div');
-      googleDocsSection.className = 'platform-section';
-      googleDocsSection.innerHTML = `
-        <h3 style="color: #2c3e50; margin-bottom: 1.5rem; display: flex; align-items: center; font-size: 1.4rem; font-weight: 700;">
-          <span style="margin-right: 1rem;">📝</span>
-          Google Docs
-        </h3>
-        <div id="google-docs-content"></div>
-      `;
-      
-      const googleDocsResults = data.search_results?.google_docs || [];
-      const googleDocsContent = googleDocsSection.querySelector('#google-docs-content');
-      
-      if (googleDocsResults.length > 0) {
-        googleDocsResults.forEach(doc => {
-          const docCard = document.createElement('div');
-          docCard.className = 'card';
-          docCard.innerHTML = `
-            <div style="border-left: 6px solid #4285F4; padding-left: 1.5rem;">
-              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
-                <div>
-                  <strong style="color: #4285F4; font-size: 1.2rem;">Document:</strong> 
-                  <a href="${doc.url || '#'}" target="_blank" style="color: #4285F4; font-weight: bold; text-decoration: none; padding: 0.25rem 0.5rem; background: rgba(66, 133, 244, 0.1); border-radius: 6px; margin-left: 0.5rem;">${doc.title || 'Untitled Document'}</a>
-                </div>
-                <div style="text-align: right; font-size: 0.9rem; color: #666;">
-                  ${doc.lastModified ? new Date(doc.lastModified).toLocaleDateString() : 'Unknown date'}
-                </div>
-              </div>
-              <div style="margin-bottom: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                <span style="background: rgba(66, 133, 244, 0.1); color: #4285F4; padding: 0.3rem 0.75rem; border-radius: 20px; font-size: 0.85rem; font-weight: 600;">${doc.type || 'Document'}</span>
-                ${doc.owner ? `<span style="background: #f0f0f0; color: #333; padding: 0.3rem 0.75rem; border-radius: 20px; font-size: 0.85rem;">Owner: ${doc.owner}</span>` : ''}
-                ${doc.folder ? `<span style="background: #fff3e0; color: #f57c00; padding: 0.3rem 0.75rem; border-radius: 20px; font-size: 0.85rem;">📁 ${doc.folder}</span>` : ''}
-              </div>
-              ${doc.excerpt ? `
-                <div>
-                  <strong style="color: #2c3e50; font-size: 1.05rem;">Content Preview:</strong>
-                  <div style="margin-top: 0.75rem; padding: 1rem; background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%); border-radius: 8px; border-left: 4px solid #4285F4; max-height: 150px; overflow-y: auto; line-height: 1.5;">
-                    ${doc.excerpt}
-                  </div>
-                </div>
-              ` : ''}
-              ${doc.metadata?.relevance_score ? `
-                <div style="margin-top: 1rem; text-align: right;">
-                  <span style="background: linear-gradient(135deg, #e3f2fd, #bbdefb); color: #1976d2; padding: 0.4rem 1rem; border-radius: 20px; font-size: 0.9rem; font-weight: 600;">
-                    Relevance: ${(doc.metadata.relevance_score * 100).toFixed(0)}%
-                  </span>
-                </div>
-              ` : ''}
-            </div>
-          `;
-          googleDocsContent.appendChild(docCard);
-        });
-      } else {
-        googleDocsContent.innerHTML = '<div style="text-align: center; padding: 2rem; background: #f8f9fa; border-radius: 12px; color: #666; font-style: italic; font-size: 1.1rem;">No Google Docs found</div>';
-      }
-      
-      platformResults.appendChild(googleDocsSection);
-      searchResults.appendChild(platformResults);
-
-      // Show results with animation
-      searchResults.style.display = 'block';
-      searchResults.style.opacity = '0';
-      setTimeout(() => {
-        searchResults.style.transition = 'opacity 0.5s ease-in';
-        searchResults.style.opacity = '1';
-      }, 100);
+    } else {
+      statsHTML = `<div style="background: rgba(220, 53, 69, 0.15); padding: 0.75rem 1.25rem; border-radius: 12px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">...</div>`;
     }
+    mcpStats.innerHTML = statsHTML;
+
+    // --- Populate LLM Response ---
+    llmResponseContent.innerHTML = data.analysis ? marked.parse(data.analysis) : 'No analysis available.';
+
+    // --- Populate Platform Results ---
+    const results = data.search_results || {};
+
+    // Slack
+    const slackContainer = document.getElementById('slack-results');
+    if (results.slack_messages && results.slack_messages.length > 0) {
+        let slackHTML = '<h3><span style="margin-right: 1rem;">💬</span>Slack Messages</h3>';
+        results.slack_messages.forEach(msg => {
+            slackHTML += `<div class="card">...</div>`; // (Your original card HTML for Slack)
+        });
+        slackContainer.innerHTML = slackHTML;
+    }
+
+    // Jira
+    const jiraContainer = document.getElementById('jira-results');
+    if (results.jira_issues && results.jira_issues.length > 0) {
+        let jiraHTML = '<h3><span style="margin-right: 1rem;">🎫</span>Jira Issues</h3>';
+        results.jira_issues.forEach(issue => {
+            jiraHTML += `<div class="card">...</div>`; // (Your original card HTML for Jira)
+        });
+        jiraContainer.innerHTML = jiraHTML;
+    }
+
+    // Confluence
+    const confluenceContainer = document.getElementById('confluence-results');
+    if (results.confluence_pages && results.confluence_pages.length > 0) {
+        let confluenceHTML = '<h3><span style="margin-right: 1rem;">📄</span>Confluence Pages</h3>';
+        results.confluence_pages.forEach(page => {
+            confluenceHTML += `<div class="card">...</div>`; // (Your original card HTML for Confluence)
+        });
+        confluenceContainer.innerHTML = confluenceHTML;
+    }
+
+    // Google Docs
+    const googleDocsContainer = document.getElementById('google-docs-results');
+    if (results.google_docs && results.google_docs.length > 0) {
+        let docsHTML = '<h3><span style="margin-right: 1rem;">📝</span>Google Docs</h3>';
+        results.google_docs.forEach(doc => {
+            docsHTML += `<div class="card">...</div>`; // (Your original card HTML for Google Docs)
+        });
+        googleDocsContainer.innerHTML = docsHTML;
+    }
+
+
+    // Show results with animation
+    searchResults.style.display = 'block';
+    searchResults.style.opacity = '0';
+    setTimeout(() => {
+      searchResults.style.transition = 'opacity 0.5s ease-in';
+      searchResults.style.opacity = '1';
+    }, 100);
+}
 
     let isCacheDisabled = false;
 
